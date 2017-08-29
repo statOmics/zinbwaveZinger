@@ -1033,21 +1033,21 @@ calcZinbWaveWeights <- function(zinbwaveFit, counts){
   zeroId = counts==0
 
   # covariates
-  Xmu = zinbwaveFit@X[,zinbwaveFit@which_X_mu]
-  Xpi = zinbwaveFit@X[,zinbwaveFit@which_X_pi]
-  Vmu = zinbwaveFit@V[,zinbwaveFit@which_V_mu]
-  Vpi = zinbwaveFit@V[,zinbwaveFit@which_V_pi]
-  W = zinbwaveFit@W
+  Xmu = getX_mu(zinbwaveFit)
+  Xpi = getX_pi(zinbwaveFit)
+  Vmu = getV_mu(zinbwaveFit)
+  Vpi = getV_pi(zinbwaveFit)
+  W = getW(zinbwaveFit)
   Omu = zinbwaveFit@O_mu
   Opi = zinbwaveFit@O_pi
   # parameters
-  betaMu = zinbwaveFit@beta_mu
-  gammaMu = zinbwaveFit@gamma_mu
-  alphaMu = zinbwaveFit@alpha_mu
-  betaPi = zinbwaveFit@beta_pi
-  gammaPi = zinbwaveFit@gamma_pi
-  alphaPi = zinbwaveFit@alpha_pi
-  phi = 1/exp(zinbwaveFit@zeta) #dispersion
+  betaMu = getBeta_mu(zinbwaveFit)
+  gammaMu = getGamma_mu(zinbwaveFit)
+  alphaMu = getAlpha_mu(zinbwaveFit)
+  betaPi = getBeta_pi(zinbwaveFit)
+  gammaPi = getGamma_pi(zinbwaveFit)
+  alphaPi = getAlpha_mu(zinbwaveFit)
+  phi = getPhi(zinbwaveFit) #dispersion
 
   # derive mean and pi
   mu = t(exp(Xmu%*%betaMu + t(Vmu%*%gammaMu) + W%*%alphaMu + Omu))
