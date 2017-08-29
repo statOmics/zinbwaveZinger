@@ -1046,7 +1046,7 @@ calcZinbWaveWeights <- function(zinbwaveFit, counts){
   alphaMu = getAlpha_mu(zinbwaveFit)
   betaPi = getBeta_pi(zinbwaveFit)
   gammaPi = getGamma_pi(zinbwaveFit)
-  alphaPi = getAlpha_mu(zinbwaveFit)
+  alphaPi = getAlpha_pi(zinbwaveFit)
   phi = getPhi(zinbwaveFit) #dispersion
 
   # derive mean and pi
