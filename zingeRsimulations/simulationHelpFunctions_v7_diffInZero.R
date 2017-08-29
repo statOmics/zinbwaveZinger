@@ -1025,11 +1025,7 @@ function(counts, group, design = NULL, mc.cores = 4, niter=NULL, w=NULL)
       out
 }
 
-
-## zinbwave-zinger
 calcZinbWaveWeights <- function(zinbwaveFit, counts){
-  #NOTE: this function assumes identical model for mu and pi
-
   # define expit
   expit = function(x) exp(x)/(1+exp(x))
 
@@ -1037,8 +1033,10 @@ calcZinbWaveWeights <- function(zinbwaveFit, counts){
   zeroId = counts==0
 
   # covariates
-  X = zinbwaveFit@X
-  V = zinbwaveFit@V
+  Xmu = zinbwaveFit@X[,zinbwaveFit@which_X_mu]
+  Xpi = zinbwaveFit@X[,zinbwaveFit@which_X_pi]
+  Vmu = zinbwaveFit@V[,zinbwaveFit@which_V_mu]
+  Vpi = zinbwaveFit@V[,zinbwaveFit@which_V_pi]
   W = zinbwaveFit@W
   Omu = zinbwaveFit@O_mu
   Opi = zinbwaveFit@O_pi
@@ -1052,15 +1050,14 @@ calcZinbWaveWeights <- function(zinbwaveFit, counts){
   phi = 1/exp(zinbwaveFit@zeta) #dispersion
 
   # derive mean and pi
-  mu = t(exp(X%*%betaMu + t(V%*%gammaMu) + W%*%alphaMu + Omu))
-  pi = t(expit(X%*%betaPi + t(V%*%gammaPi) + W%*%alphaPi + Opi))
+  mu = t(exp(Xmu%*%betaMu + t(Vmu%*%gammaMu) + W%*%alphaMu + Omu))
+  pi = t(expit(Xpi%*%betaPi + t(Vpi%*%gammaPi) + W%*%alphaPi + Opi))
 
-  # derive posterior prob on ZI
+  # derive posterior prob on count component
   w = 1 - pi*zeroId/(pi*zeroId + (1-pi)*dnbinom(counts, mu=mu, size=1/phi))
   if(any(w==0)) w[w==0] = 1e-16
   return(w)
 }
-
 
 getDataset <- function(counts, drop.extreme.dispersion = 0.1, drop.low.lambda = TRUE) {
 ## this function generates NB parameters from real dataset ##
