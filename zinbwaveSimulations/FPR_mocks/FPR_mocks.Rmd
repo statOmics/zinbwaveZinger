@@ -1,0 +1,445 @@
+---
+title: "Case study on neuronal cells - FPR on mocks"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(DESeq2)
+library(edgeR)
+library(limma)
+library(zingeR)
+library(zinbwave)
+
+library(genefilter)
+
+library(BiocParallel)
+library(doParallel)
+library(Biobase)
+library(ggplot2)
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to compare the FPR between zinbwave-DE, zingeR-DE, and other DE methods on mock communities. I'll first try to reproduce Figure 5 from zingeR preprint.
+
+# Data
+```{r data}
+path = '~/Documents/scRNAseq/gitrepo/zingeRPaper-master/singleCellPaper/case/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+
+file = paste0(path, "fpr/subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+```
+
+# Functions
+
+Code for rna-seq and zinger rna-seq functions are adapted from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
+
+```{r sourceEdgeR}
+runEdgeR <- function(e) {
+  library(edgeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  dgel=estimateDisp(dgel,design)
+  edger.fit <- glmFit(dgel, design)
+  edger.lrt <- glmLRT(edger.fit, coef="conditionB")
+  pvals <- edger.lrt$table$PValue
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  logfc <- edger.lrt$table$logFC
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+
+```
+
+```{r deseq2}
+runDESeq2_poscounts <- function(e) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
+  dds <- estimateSizeFactors(dds,type="poscounts")
+  dds <- estimateDispersions(dds)
+  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
+  res <- results(dds, name="condition_B_vs_A")
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  logfc <- res$log2FoldChange
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+```
+
+```{r sourceEdgeRzingeR}
+# code from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
+runEdgeREMLibSize=function(e){
+  library(edgeR)
+  library(genefilter)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  #not adding a design matrix models the zeroes with the library size automatically
+  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
+  pickingSession = pData(e)[,"Picking sessions"]
+  designZI = model.matrix(~ effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
+  d$weights = zeroWeights
+  d=estimateDisp(d,design)
+  fit <- glmFit(d, design)
+  lrt = glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
+}
+```
+
+```{r zingerdeseq2}
+pvalueAdjustment_kvdb <- function(baseMean, filter, pValue,
+                             theta, alpha=0.05, pAdjustMethod="BH") {
+  # perform independent filtering
+    if (missing(filter)) {
+      filter <- baseMean
+    }
+    if (missing(theta)) {
+      lowerQuantile <- mean(filter == 0)
+      if (lowerQuantile < .95) upperQuantile <- .95 else upperQuantile <- 1
+      theta <- seq(lowerQuantile, upperQuantile, length=50)
+    }
+
+    # do filtering using genefilter
+    stopifnot(length(theta) > 1)
+    filtPadj <- filtered_p(filter=filter, test=pValue,
+                           theta=theta, method=pAdjustMethod)
+    numRej  <- colSums(filtPadj < alpha, na.rm = TRUE)
+    # prevent over-aggressive filtering when all genes are null,
+    # by requiring the max number of rejections is above a fitted curve.
+    # If the max number of rejection is not greater than 10, then don't
+    # perform independent filtering at all.
+    lo.fit <- lowess(numRej ~ theta, f=1/5)
+    if (max(numRej) <= 10) {
+      j <- 1
+    } else {
+      residual <- if (all(numRej==0)) {
+        0
+      } else {
+        numRej[numRej > 0] - lo.fit$y[numRej > 0]
+      }
+      thresh <- max(lo.fit$y) - sqrt(mean(residual^2))
+      j <- if (any(numRej > thresh)) {
+        which(numRej > thresh)[1]
+      } else {
+        1
+      }
+    }
+    padj <- filtPadj[, j, drop=TRUE]
+    cutoffs <- quantile(filter, theta)
+    filterThreshold <- cutoffs[j]
+    filterNumRej <- data.frame(theta=theta, numRej=numRej)
+    filterTheta <- theta[j]
+
+    return(list(padj=padj, filterThreshold=filterThreshold, filterTheta=filterTheta, filterNumRej = filterNumRej, lo.fit=lo.fit, alpha=alpha))
+
+}
+
+
+runDESeq2Zero <- function(e){
+  library(DESeq2) ; library(genefilter)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
+  designZI=model.matrix(~effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE,
+                              design=model.matrix(~condition + pickingSession),
+                              colData=colData(dse), normalization="DESeq2_pos",
+                              designZI=designZI)
+  assays(dse)[["weights"]] = zeroWeights
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE, modelMatrixType="standard")
+  res <- results(dse, name="condition_B_vs_A")
+  baseMean=unname(rowMeans(sweep(counts(dse),2,1/sizeFactors(dse),FUN="*")))
+  pvalDesZero = 2*(1-pt(abs(res$stat),df=rowSums(zeroWeights)-2))
+  padjusted = pvalueAdjustment_kvdb(pValue=pvalDesZero,filter=baseMean,alpha=0.05)
+  list(pvals=pvalDesZero,padj=padjusted$padj,logfc=res$log2FoldChange)
+}
+```
+
+```{r zinbwaveEdgeR}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+
+runZinbwaveEdgeR <- function(e){
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
+  library(zinbwave)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  # use zingeR-edgeR
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- weights
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  pvals = lrt$table$PValue
+  list(pvals = pvals, padj = lrt$table$padjFilter, logfc = lrt$table$logFC)
+}
+```
+
+```{r zinbwavedeseq2}
+runZinbwaveDESeq2 <- function(e){
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
+  library(zinbwave)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  # use zingeR-DESeq2
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dimnames(weights) = NULL
+  assays(dse)[["weights"]] = weights
+  dse <- estimateDispersions(dse)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  resultsNames(dse)
+  res = results(dse, name="conditionB")
+  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
+}
+```
+
+```{r}
+runMAST <- function(e){
+  require(MAST)
+  counts <- exprs(e)
+  tpm <- counts*1e6/colSums(counts)
+  sca <- FromMatrix(tpm,
+                    cData=data.frame(group=pData(e)$condition,
+                                     pickingSession=pData(e)$pickingSession))
+  ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
+  CD <- colData(sca)
+  CD$ngeneson <- ngeneson
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group + pickingSession, sca = sca,
+             method = "bayesglm", ebayes = TRUE)
+  L <- matrix(0, nrow = ncol(coef(fit, "D")))
+  rownames(L) <- colnames(coef(fit, "D"))
+  L["groupB",] <- 1
+  lrFit <- lrTest(fit, hypothesis = L)
+  pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
+  padj <- p.adjust(pval, method = "BH")
+  list(pvals = pval, padj = padj, logfc = NA)
+}
+```
+
+```{r limmavoom}
+runVoom <- function(e) {
+  library(limma)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  v <- voom(dgel,design,plot=FALSE)
+  fit <- lmFit(v,design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef="conditionB",n=nrow(dgel),sort.by="none")
+  pvals <- tt$P.Value
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=tt$logFC)
+}
+```
+
+# Results
+
+We remove genes with only zeros. It seems that edgeR and zingeR-edgeR don't need to remove these genes. What are the pvalues for these genes?
+
+## Boxplots
+```{r res}
+algos <- list("DESeq2_poscounts"= runDESeq2_poscounts,
+              "zingeR-DESeq2"   = runDESeq2Zero,
+              "zinbwave-DESeq2" = runZinbwaveDESeq2,
+              "edgeR"           = runEdgeR,
+              "zingeR-edgeR"    = runEdgeREMLibSize,
+              "zinbwave-edgeR"  = runZinbwaveEdgeR,
+              "limma-voom"      = runVoom,
+              "MAST"            = runMAST)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+nreps <- 10
+```
+
+```{r,eval=FALSE}
+res <- lapply(1:nreps, function(i) {
+    cat(i," ")
+    eLoop <- eset[,as.numeric(subsets[i,])]
+    cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
+    eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+    condition=factor(rep(c("A","B"),each=45))
+    pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+    pData(eLoop)$condition=condition
+    pData(eLoop)$pickingSession=pickingSession
+    resFPR <- lapply(namesAlgos, function(n){
+      print(n)
+      algos[[n]](eLoop)
+    })
+    save(resFPR, file = sprintf('FPR_.%srda', i))
+    rm(resFPR)
+    i
+})
+```
+
+```{r}
+res <- lapply(1:nreps, function(i) {
+  load(sprintf('FPR_.%srda', i))
+  resFPR
+})
+```
+
+Question: In zingeR preprint, a gene is said to be positively DE is its pvalue is lower than 0.05. Should not we be looking at the adjusted pvalue instead? Or we are looking at the number of false discoveries when multiple testing is not used?
+```{r mocksBoxplot}
+hlp=lapply(res,function(replication){
+  lapply(replication,function(method){
+    pval=method$pvals
+    pval[is.na(pval)]=1 #independent filtering
+    mean(pval<=0.05)
+  })
+})
+
+fprHat=Reduce(hlp,f=cbind)
+fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
+rownames(fprHat)=namesAlgos
+
+boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
+ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
+    geom_point(position = position_jitter(w = 0.1, h = 0),
+               color="grey50", size=1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
+  scale_colour_discrete(guide="none")  + ylab("False Positive Rate") +
+  geom_hline(aes(yintercept=0.05,colour="red"))
+```
+
+## Histograms of pvalues
+```{r mocksPvalues}
+par(mfrow=c(3,3))
+hh <- sapply(1:length(res[[1]]), function(i){
+  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="",
+       breaks=seq(0,1,by=0.05)) 
+})
+par(mfrow=c(1,1))
+```
+
+## Influence of epsilon
+```{r dataEloop}
+i = 1
+eLoop <- eset[,as.numeric(subsets[i,])]
+cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
+eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+condition=factor(rep(c("A","B"),each=45))
+pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+pData(eLoop)$condition=condition
+pData(eLoop)$pickingSession=pickingSession
+design <- model.matrix(~ condition + pickingSession)
+```
+
+```{r zinbesp}
+epsVec = 10^(0:10)
+#zinbList <- lapply(epsVec, function(eps){
+#  zinbFit(exprs(eLoop), X = design, epsilon = eps)
+#})
+#save(zinbList, file = 'zinbList_epsilon.rda')
+load('zinbList_epsilon.rda')
+```
+
+```{r pvals}
+weightsList <- lapply(zinbList, function(x){
+  computeZinbwaveWeights(x, exprs(eLoop))
+})
+
+pvalsList <- lapply(weightsList, function(w){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- w
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  lrt$table$PValue
+})
+```
+
+```{r mocksEspilonBCV}
+par(mfrow=c(3,3))
+myplot <- lapply(1:9, function(i){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- weightsList[[i]]
+  d=estimateDisp(d, design)
+  plotBCV(d, main = paste0('epsilon=', epsVec[i]), ylim = c(0,6))
+})
+par(mfrow=c(1,1))
+```
+
+Weights distributions are quite similar
+```{r mocksEspilonWeights}
+par(mfrow = c(3,3))
+hh = lapply(1:9, function(i){
+   hist(weightsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
+})
+par(mfrow = c(1,1))
+```
+
+False Positive Rate (FPR) is smaller than 0.05 for epsilon > 10^5.
+```{r  mocksEspilonFPR}
+fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
+fpr
+plot(log10(epsVec), fpr, main = '', type = 'o',
+     xlab = 'epsilon (log10)', ylab = 'FPR')
+abline(h = 0.05, col = 'red')
+```
+
+Histogram of pvalues. We should see uniform distribution. When epsilon is small, pvalues are not uniformly distributed. When epsilon > 10^6, pvalues are uniformly distributed.
+```{r mocksEspilonPvalues}
+par(mfrow = c(3,3))
+hh = lapply(1:9, function(i){
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000))
+})
+par(mfrow = c(1,1))
+```
+
+

@@ -1,0 +1,226 @@
+---
+title: "zingeR versus zinbwave weights - influence of epsilon"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(BiocParallel)
+library(doParallel)
+library(zingeR)
+library(Biobase)
+library(gamlss)
+library(gamlss.tr)
+library(edgeR)
+library(scales)
+library(DESeq2)
+library(iCOBRA) # roc
+library(limma)
+library(genefilter) #filtered pvalues
+library(MAST)
+library(RColorBrewer)
+library(ggplot2)
+library(wesanderson)
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+```{r data}
+data(islamEset, package = "zingeR")
+islamHlp=exprs(islamEset)[9:2008,] #first 8 are spike-ins.
+cellType=pData(islamEset)[,"cellType"]
+paramsIslam = getDatasetZTNB(counts = islamHlp, 
+                             design = model.matrix(~ cellType))
+```
+
+```{r sims}
+nSamples=80
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=2000 #nr of features
+set.seed(436)
+DEind = sample(1:nTags,floor(nTags*.10),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
+simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = islamHlp, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsIslam,
+                                lib.size = libSizes)
+simDataIslam$counts[1:5,1:5]
+```
+
+# Methods
+
+zinbwave for different epsilon
+
+```{r zinbwaveWeights}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+```
+
+```{r}
+zinbwave_edgeR <- function(counts, group, zinb){
+  d=DGEList(counts)
+  d=suppressWarnings(calcNormFactors(d))
+  design=model.matrix(~group)
+  weights <- computeZinbwaveWeights(zinb, d$counts)
+  d$weights <- weights
+  d=estimateDisp(d, design)
+  plotBCV(d)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  cbind(pval = lrt$table$PValue, padj = lrt$table$padjFilter,
+        logFC = lrt$table$logFC)
+}
+```
+
+```{r}
+zinbwave_DESeq2 <- function(counts, group, zinb){
+  colData=data.frame(group=group)
+  design=model.matrix(~group)
+  dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  weights <- computeZinbwaveWeights(zinb, d$counts)
+  assays(dse)[["weights"]]=weights
+  dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse = estimateDispersions(dse)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  res = results(dse)
+  cbind(pval = res$pvalue, padj = res$padj, logFC = res$log2FoldChange)
+}
+```
+
+```{r}
+zinbwave_limma <- function(counts, group, zinb){
+  design <- model.matrix(~group)
+  nf <- edgeR::calcNormFactors(counts)
+  zeroWeights <- computeZinbwaveWeights(zinb, d$counts)
+  y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
+            weights = zeroWeights)
+  y$weights <- zeroWeights
+  fit <- lmFit(y, design, weights=y$weights)
+  fit$df.residual <- rowSums(zeroWeights) - ncol(design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef=2,n=nrow(counts), sort.by = "none")
+  pval <- tt$P.Value
+  padj <- tt$adj.P.Val
+  logFC <- tt$logFC
+  cbind(pval = pval, padj = padj, logFC = logFC)
+}
+```
+
+```{r core}
+core <- SummarizedExperiment(simDataIslam$counts,
+                             colData = data.frame(grp = grp))
+```
+
+```{r zinbcommondisp}
+epsVec = c(1e-6, 1, 1e2, 1e4, 1e6, 1e8, 1e10)
+zinbList <- lapply(epsVec, function(eps){
+  zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = eps)
+})
+```
+
+# Results
+
+## Biological coefficient of variation (BCV)
+
+```{r, warning=FALSE}
+counts = simDataIslam$counts
+group = grp
+
+resList = lapply(zinbList, function(zinb){
+  zinbwave_edgeR(counts, grp, zinb)
+})
+```
+
+## pval histograms
+```{r}
+res = lapply(resList, as.data.frame)
+names(res) = as.character(epsVec)
+```
+
+```{r histogramPVAL}
+hist = lapply(1:length(res), function(i){
+  hist(res[[i]][,'pval'], main = paste0('epsilon=', names(res)[i]))
+})
+```
+
+## Volcano plots
+```{r volcanos}
+trueDE = rep(0, nTags)
+trueDE[simDataIslam$indDE] = 1
+
+volcanos <- lapply(1:length(res), function(i){
+  plot(res[[i]][, 'logFC'], -log10(res[[i]][, 'padj']),
+       pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 15),
+       ylab = '-log10(pvalue)', xlab = 'logFC', 
+       main = paste0('epsilon=',names(res)[i]))
+  points(res[[i]][simDataIslam$indDE, 'logFC'], pch=1, col=3, cex=.5, lwd=1,
+          -log10(res[[i]][simDataIslam$indDE, 'padj']))
+})
+```
+
+```{r}
+lapply(resList, function(x){
+  sum(is.na(x[, 'padj']))
+})
+```
+
+## nDE, TPR, FDR at pval=0.05
+```{r nb}
+lapply(res, function(y){
+  nDE = sum(y$padj <= 0.05, na.rm = TRUE)
+  TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
+  FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
+  c(nDE = nDE, TPR = TPR, FPR = FPR)
+})
+```
+
+## TPR vs FDR
+```{r plot}
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
+               truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplot <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
+                 linewidth = .5)
+```
+
+```{r}
+cobraplot <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
+                 xaxisrange = c(0, 0.2),linewidth = .5)
+```
+
+## Weights
+
+```{r}
+weightsList <- lapply(zinbList, function(zinb){
+  computeZinbwaveWeights(zinb, counts)
+})
+
+hh = lapply(weightsList, hist)
+```
+
