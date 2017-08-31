@@ -82,7 +82,7 @@ simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islamHlp, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes)
+                                lib.size = libSizes, cpm="AveLogCPM")
 simDataIslam$counts[1:5,1:5]
 
 # BCV plots

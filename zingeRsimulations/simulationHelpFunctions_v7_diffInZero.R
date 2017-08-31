@@ -99,7 +99,7 @@ getDatasetZTNB = function(counts, design, drop.extreme.dispersion = FALSE, cpm= 
 	list(dataset.AveLogCPM = dataset.AveLogCPM, dataset.dispersion = dataset.dispersion, dataset.lib.size = dataset.lib.size, dataset.nTags = dataset.nTags, dataset.propZeroFit=zeroFit, dataset.lambda=lambda, dataset.propZeroGene=propZeroGene, dataset.breaks = breaks, dataset.cpm=cpm)
 }
 
-NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group), lib.size = NULL, drop.low.lambda = TRUE, drop.extreme.dispersion = 0.1, pUp=.5, foldDiff=3, verbose=TRUE, ind=NULL, params=NULL, cpm=c("aCpm","AveLogCPM"), max.dispersion=400, min.dispersion=0.1)
+NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group), lib.size = NULL, drop.low.lambda = TRUE, drop.extreme.dispersion = 0.1, pUp=.5, foldDiff=3, verbose=TRUE, ind=NULL, params=NULL, cpm="AveLogCPM", max.dispersion=400, min.dispersion=0.1)
 {
 	require(edgeR)
 	group = as.factor(group)
