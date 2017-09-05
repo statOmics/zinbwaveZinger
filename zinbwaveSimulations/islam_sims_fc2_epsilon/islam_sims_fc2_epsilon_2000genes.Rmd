@@ -41,7 +41,7 @@ source('../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R')
 
 ```{r data}
 data(islamEset, package = "zingeR")
-islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
+islamHlp=exprs(islamEset)[9:2008,] #first 8 are spike-ins.
 cellType=pData(islamEset)[,"cellType"]
 paramsIslam = getDatasetZTNB(counts = islamHlp, 
                              design = model.matrix(~ cellType))
@@ -223,7 +223,7 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-cobraplot <- prepare_data_for_plot(cobraperf)
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = 'Set1')
 plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
                  linewidth = .5)
 ```
