@@ -1,0 +1,137 @@
+---
+title: "Case study on neuronal cells - FPR on mocks"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(DESeq2)
+library(edgeR)
+library(limma)
+library(zingeR)
+library(zinbwave)
+
+library(genefilter)
+
+library(BiocParallel)
+library(doParallel)
+library(Biobase)
+library(ggplot2)
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+We want to evaluate the impact of the ridge penalty (epsilon)  of ZINB-WaVE on the performance (TPR) for the mock communities from the Usoskin dataset.
+
+# Data
+```{r data}
+path = '~/Documents/scRNAseq/gitrepo/zingeRPaper/singleCellPaper/case/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+
+file = paste0(path, "fpr/subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+```
+
+# Influence of epsilon
+```{r dataEloop}
+i = 1
+eLoop <- eset[,as.numeric(subsets[i,])]
+cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
+eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+condition=factor(rep(c("A","B"),each=45))
+pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+pData(eLoop)$condition=condition
+pData(eLoop)$pickingSession=pickingSession
+design <- model.matrix(~ condition + pickingSession)
+```
+
+```{r zinbesp}
+epsVec = 10^(0:10)
+#zinbList <- lapply(epsVec, function(eps){
+#  zinbFit(exprs(eLoop), X = design, epsilon = eps)
+#})
+#save(zinbList, file = 'zinbList_epsilon.rda')
+load('zinbList_epsilon.rda')
+```
+
+```{r pvals}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+
+weightsList <- lapply(zinbList, function(x){
+  computeZinbwaveWeights(x, exprs(eLoop))
+})
+
+pvalsList <- lapply(weightsList, function(w){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- w
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  lrt$table$PValue
+})
+```
+
+```{r mocksEspilonBCV}
+par(mfrow=c(3,3))
+myplot <- lapply(1:9, function(i){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- weightsList[[i]]
+  d=estimateDisp(d, design)
+  plotBCV(d, main = paste0('epsilon=', epsVec[i]), ylim = c(0,6))
+})
+par(mfrow=c(1,1))
+```
+
+Weights distributions are quite similar
+```{r mocksEspilonWeights}
+par(mfrow = c(3,3))
+hh = lapply(1:9, function(i){
+   hist(weightsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
+})
+par(mfrow = c(1,1))
+```
+
+False Positive Rate (FPR) is smaller than 0.05 for epsilon > 10^5.
+```{r  mocksEspilonFPR}
+fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
+fpr
+plot(log10(epsVec), fpr, main = '', type = 'o',
+     xlab = 'epsilon (log10)', ylab = 'FPR')
+abline(h = 0.05, col = 'red')
+```
+
+Histogram of pvalues. We should see uniform distribution. When epsilon is small, pvalues are not uniformly distributed. When epsilon > 10^6, pvalues are uniformly distributed.
+```{r mocksEspilonPvalues}
+par(mfrow = c(3,3))
+hh = lapply(1:9, function(i){
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000))
+})
+par(mfrow = c(1,1))
+```
+
+

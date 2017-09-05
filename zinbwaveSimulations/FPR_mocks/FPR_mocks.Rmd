@@ -37,7 +37,7 @@ The goal of this document is to compare the FPR between zinbwave-DE, zingeR-DE, 
 
 # Data
 ```{r data}
-path = '~/Documents/scRNAseq/gitrepo/zingeRPaper-master/singleCellPaper/case/'
+path = '~/Documents/scRNAseq/gitrepo/zingeRPaper/singleCellPaper/case/'
 load(paste0(path, 'esetUsoskin.RData'))
 eset=eset[rowSums(exprs(eset)>0)>=20,]
 exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
@@ -245,9 +245,21 @@ runMAST <- function(e){
   require(MAST)
   counts <- exprs(e)
   tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
   sca <- FromMatrix(tpm,
                     cData=data.frame(group=pData(e)$condition,
                                      pickingSession=pData(e)$pickingSession))
+  
+  # Adaptive thresholding from MAST vignette
+  freq_expressed <- 0.2
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
+                                     conditions = pData(e)$condition)
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  expressed_genes <- freq(sca) > freq_expressed
+  sca <- sca[expressed_genes,]
+
   ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
   CD <- colData(sca)
   CD$ngeneson <- ngeneson
@@ -304,7 +316,7 @@ names(namesAlgos) <- namesAlgos
 nreps <- 10
 ```
 
-```{r,eval=FALSE}
+```{r}
 res <- lapply(1:nreps, function(i) {
     cat(i," ")
     eLoop <- eset[,as.numeric(subsets[i,])]
@@ -365,81 +377,6 @@ hh <- sapply(1:length(res[[1]]), function(i){
 par(mfrow=c(1,1))
 ```
 
-## Influence of epsilon
-```{r dataEloop}
-i = 1
-eLoop <- eset[,as.numeric(subsets[i,])]
-cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
-eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
-condition=factor(rep(c("A","B"),each=45))
-pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
-pData(eLoop)$condition=condition
-pData(eLoop)$pickingSession=pickingSession
-design <- model.matrix(~ condition + pickingSession)
-```
 
-```{r zinbesp}
-epsVec = 10^(0:10)
-#zinbList <- lapply(epsVec, function(eps){
-#  zinbFit(exprs(eLoop), X = design, epsilon = eps)
-#})
-#save(zinbList, file = 'zinbList_epsilon.rda')
-load('zinbList_epsilon.rda')
-```
-
-```{r pvals}
-weightsList <- lapply(zinbList, function(x){
-  computeZinbwaveWeights(x, exprs(eLoop))
-})
-
-pvalsList <- lapply(weightsList, function(w){
-  d <- DGEList(exprs(eLoop))
-  d <- edgeR::calcNormFactors(d)
-  d$weights <- w
-  d=estimateDisp(d, design)
-  fit=glmFit(d,design)
-  lrt=glmWeightedF(fit, coef=2, independentFiltering = TRUE)
-  lrt$table$PValue
-})
-```
-
-```{r mocksEspilonBCV}
-par(mfrow=c(3,3))
-myplot <- lapply(1:9, function(i){
-  d <- DGEList(exprs(eLoop))
-  d <- edgeR::calcNormFactors(d)
-  d$weights <- weightsList[[i]]
-  d=estimateDisp(d, design)
-  plotBCV(d, main = paste0('epsilon=', epsVec[i]), ylim = c(0,6))
-})
-par(mfrow=c(1,1))
-```
-
-Weights distributions are quite similar
-```{r mocksEspilonWeights}
-par(mfrow = c(3,3))
-hh = lapply(1:9, function(i){
-   hist(weightsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
-})
-par(mfrow = c(1,1))
-```
-
-False Positive Rate (FPR) is smaller than 0.05 for epsilon > 10^5.
-```{r  mocksEspilonFPR}
-fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
-fpr
-plot(log10(epsVec), fpr, main = '', type = 'o',
-     xlab = 'epsilon (log10)', ylab = 'FPR')
-abline(h = 0.05, col = 'red')
-```
-
-Histogram of pvalues. We should see uniform distribution. When epsilon is small, pvalues are not uniformly distributed. When epsilon > 10^6, pvalues are uniformly distributed.
-```{r mocksEspilonPvalues}
-par(mfrow = c(3,3))
-hh = lapply(1:9, function(i){
-  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000))
-})
-par(mfrow = c(1,1))
-```
 
 

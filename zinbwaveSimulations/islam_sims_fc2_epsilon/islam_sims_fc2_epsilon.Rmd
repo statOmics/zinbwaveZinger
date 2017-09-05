@@ -1,5 +1,5 @@
 ---
-title: "zingeR versus zinbwave weights - influence of epsilon"
+title: "Impact of the ridge penalty on the performance (TPR and FDP)"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
 output: 
@@ -16,17 +16,10 @@ knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE
 library(zinbwave)
 library(BiocParallel)
 library(doParallel)
-library(zingeR)
 library(Biobase)
-library(gamlss)
-library(gamlss.tr)
-library(edgeR)
 library(scales)
-library(DESeq2)
 library(iCOBRA) # roc
-library(limma)
 library(genefilter) #filtered pvalues
-library(MAST)
 library(RColorBrewer)
 library(ggplot2)
 library(wesanderson)
@@ -38,9 +31,17 @@ registerDoParallel(NCORES)
 register(DoparParam())
 ```
 
+We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R  
+
+TODO: check with Koen if it's ok.  
+
+```{r}
+source('../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R')
+```
+
 ```{r data}
 data(islamEset, package = "zingeR")
-islamHlp=exprs(islamEset)[9:2008,] #first 8 are spike-ins.
+islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
 cellType=pData(islamEset)[,"cellType"]
 paramsIslam = getDatasetZTNB(counts = islamHlp, 
                              design = model.matrix(~ cellType))
@@ -49,17 +50,37 @@ paramsIslam = getDatasetZTNB(counts = islamHlp,
 ```{r sims}
 nSamples=80
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
-nTags=2000 #nr of features
-set.seed(436)
-DEind = sample(1:nTags,floor(nTags*.10),replace=FALSE) #10% DE
+nTags=10000 #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
 fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
 libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
 simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islamHlp, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes)
+                                lib.size = libSizes, cpm="AveLogCPM")
 simDataIslam$counts[1:5,1:5]
+
+# BCV plots
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
+dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~cellType), interval=c(0,10)),prior.df=0)
+
+d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataIslam$counts)))
+d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
+
+par(mfrow=c(1,2))
+plotBCV(dOrig,ylim=c(0,13), xlim=c(4,16))
+plotBCV(d,ylim=c(0,13), xlim=c(4,16))
+par(mfrow=c(1,1))
+
+# association of library size with zeros
+plot(x=log(colSums(islamHlp)), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,13))
+points(x=log(colSums(simDataIslam$counts)), y=colMeans(simDataIslam$counts==0), col=2)
+
+# association of aveLogCPM with zeros
+plot(x=edgeR::aveLogCPM(islamHlp), y=rowMeans(islamHlp==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
+points(x=edgeR::aveLogCPM(simDataIslam$counts), y=rowMeans(simDataIslam$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
 ```
 
 # Methods
@@ -81,6 +102,7 @@ computeZinbwaveWeights <- function(zinb, counts){
 
 ```{r}
 zinbwave_edgeR <- function(counts, group, zinb){
+  library(zingeR)
   d=DGEList(counts)
   d=suppressWarnings(calcNormFactors(d))
   design=model.matrix(~group)
@@ -110,24 +132,6 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 }
 ```
 
-```{r}
-zinbwave_limma <- function(counts, group, zinb){
-  design <- model.matrix(~group)
-  nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- computeZinbwaveWeights(zinb, d$counts)
-  y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
-            weights = zeroWeights)
-  y$weights <- zeroWeights
-  fit <- lmFit(y, design, weights=y$weights)
-  fit$df.residual <- rowSums(zeroWeights) - ncol(design)
-  fit <- eBayes(fit)
-  tt <- topTable(fit,coef=2,n=nrow(counts), sort.by = "none")
-  pval <- tt$P.Value
-  padj <- tt$adj.P.Val
-  logFC <- tt$logFC
-  cbind(pval = pval, padj = padj, logFC = logFC)
-}
-```
 
 ```{r core}
 core <- SummarizedExperiment(simDataIslam$counts,
@@ -135,8 +139,9 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-epsVec = c(1e-6, 1, 1e2, 1e4, 1e6, 1e8, 1e10)
+epsVec = c(1e-6, 10^-4, 10^-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10)
 zinbList <- lapply(epsVec, function(eps){
+  print(eps)
   zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = eps)
 })
 ```
@@ -149,9 +154,11 @@ zinbList <- lapply(epsVec, function(eps){
 counts = simDataIslam$counts
 group = grp
 
+par(mfrow = c(3, 3))
 resList = lapply(zinbList, function(zinb){
   zinbwave_edgeR(counts, grp, zinb)
 })
+par(mfrow = c(1, 1))
 ```
 
 ## pval histograms
@@ -161,9 +168,11 @@ names(res) = as.character(epsVec)
 ```
 
 ```{r histogramPVAL}
+par(mfrow = c(3, 3))
 hist = lapply(1:length(res), function(i){
   hist(res[[i]][,'pval'], main = paste0('epsilon=', names(res)[i]))
 })
+par(mfrow = c(1, 1))
 ```
 
 ## Volcano plots
@@ -171,6 +180,7 @@ hist = lapply(1:length(res), function(i){
 trueDE = rep(0, nTags)
 trueDE[simDataIslam$indDE] = 1
 
+par(mfrow = c(3, 3))
 volcanos <- lapply(1:length(res), function(i){
   plot(res[[i]][, 'logFC'], -log10(res[[i]][, 'padj']),
        pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 15),
@@ -179,6 +189,7 @@ volcanos <- lapply(1:length(res), function(i){
   points(res[[i]][simDataIslam$indDE, 'logFC'], pch=1, col=3, cex=.5, lwd=1,
           -log10(res[[i]][simDataIslam$indDE, 'padj']))
 })
+par(mfrow = c(1, 1))
 ```
 
 ```{r}
@@ -189,12 +200,13 @@ lapply(resList, function(x){
 
 ## nDE, TPR, FDR at pval=0.05
 ```{r nb}
-lapply(res, function(y){
+tab_de = lapply(res, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
   TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
   FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
   c(nDE = nDE, TPR = TPR, FPR = FPR)
 })
+do.call(rbind, tab_de)
 ```
 
 ## TPR vs FDR
@@ -221,6 +233,8 @@ weightsList <- lapply(zinbList, function(zinb){
   computeZinbwaveWeights(zinb, counts)
 })
 
+par(mfrow=c(3,3))
 hh = lapply(weightsList, hist)
+par(mfrow=c(1,1))
 ```
 
