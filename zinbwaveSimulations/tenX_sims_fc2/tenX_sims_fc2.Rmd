@@ -31,7 +31,6 @@ library(knitr)
 library(ggplot2)
 library(cowplot)
 # use new simulation.
-#library(zingeR)
 source("../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
 ```
 
@@ -70,33 +69,12 @@ head(fData(pbmc)) # data frame of genes
 head(pData(pbmc)) # data frame of cell barcodes
 ```
 
-Input count matrix for zinbwave should not have genes with only zero counts. Let's remove these genes righ away.
-
-```{r}
-use_genes <- get_nonzero_genes(pbmc)
-dense <- as.matrix(exprs(pbmc[use_genes, ]))
-dim(dense)
-```
-
-As a first pass, let's use only the 1000 most variable genes. We should remove this step in the future.
-
-```{r}
-library(matrixStats) # for function rowVars
-vars <- rowVars(log1p(dense))
-names(vars) <- rownames(dense)
-vars <- sort(vars, decreasing = TRUE)
-vargenes <- names(vars)[1:1000]
-
-dense <- dense[vargenes,]
-dim(dense)
-```
-
 In the 10X website, the authors performed "graph-based clustering". We will use those labels here.
 
 ```{r}
 cl <- analysis_results[["clustering"]][["graphclust"]][,'Cluster']
 names(cl) <- analysis_results[["clustering"]][["graphclust"]][,'Barcode']
-cl <- cl[colnames(dense)]
+cl <- cl[colnames(pbmc)]
 ```
 
 ```{r}
@@ -138,62 +116,72 @@ plot(analysis_results[['tsne']][,2:3][keep, ], col = pal[cl][keep],
 ```
 
 ```{r}
-counts = dense[, cl %in% 2:3]
-cl = cl[cl %in% 2:3]
+counts = counts[, cl %in% 2:3]
+cellType = cl[cl %in% 2:3]
+```
+
+Input count matrix for zinbwave should not have genes with only zero counts. Let's remove these genes righ away.
+
+```{r}
+counts <- counts[rowSums(counts) > 0, ]
+counts <- counts[rowSums(counts != 0) > 5, ]
+dim(counts)
 ```
 
 ```{r}
-paramsIslam = getDatasetZTNB(counts = counts, 
-                             design = model.matrix(~ cl))
+params = getDatasetZTNB(counts = counts, 
+                        design = model.matrix(~ cellType))
 ```
 
 
 ## Updated simulation framework
 
 
+Fit between simulated and real dataset is not great, but Koen is working on new simulation framework.
+
 ```{r sims}
-# code from https://github.com/statOmics/zingeR/blob/master/vignettes/zingeRVignette_v2.Rmd
 nSamples=80
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=10000 #nr of features
 set.seed(11)
 DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
 fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
-libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
-simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
-                                dataset = islamHlp, nTags = nTags,
-                                group = grp,
-                                verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes, cpm="AveLogCPM")
-simDataIslam$counts[1:5,1:5]
+libSizes=sample(colSums(counts),nSamples,replace=TRUE) #library sizes
+simData <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                           dataset = tenxHlp, nTags = nTags,
+                           group = grp,
+                           verbose = TRUE, params = params,
+                           lib.size = libSizes, cpm="AveLogCPM")
+simData$counts[1:5,1:5]
 ```
 
 ```{r}
 # BCV plots
-dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(counts)))
 dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~cellType), interval=c(0,10)),prior.df=0)
 
-d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataIslam$counts)))
+d=suppressWarnings(edgeR::calcNormFactors(DGEList(simData$counts)))
 d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
 ```
 
 ```{r}
 par(mfrow=c(1,2))
-plotBCV(dOrig,ylim=c(0,13), xlim=c(4,16))
-plotBCV(d,ylim=c(0,13), xlim=c(4,16))
+plotBCV(dOrig,ylim=c(0,20), xlim=c(0,20))
+plotBCV(d,ylim=c(0,20), xlim=c(0,20))
 par(mfrow=c(1,1))
 ```
 
 ```{r}
 # association of library size with zeros
-plot(x=log(colSums(islamHlp)), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,13))
-points(x=log(colSums(simDataIslam$counts)), y=colMeans(simDataIslam$counts==0), col=2)
+plot(x=log(colSums(counts)), y=colMeans(counts==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,20))
+points(x=log(colSums(simData$counts)), y=colMeans(simData$counts==0), col=2)
 ```
 
 ```{r}
 # association of aveLogCPM with zeros
-plot(x=edgeR::aveLogCPM(islamHlp), y=rowMeans(islamHlp==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
-points(x=edgeR::aveLogCPM(simDataIslam$counts), y=rowMeans(simDataIslam$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
+plot(x=edgeR::aveLogCPM(counts), y=rowMeans(counts==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
+points(x=edgeR::aveLogCPM(simData$counts),
+       y=rowMeans(simData$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
 ```
 
 # Methods
@@ -258,69 +246,6 @@ MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   lrFit <- lrTest(fit, 'group')
   pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
   padj <- p.adjust(pval, method = "BH")
-  cbind(pval = pval, padj = padj)
-}
-```
-
-## zingeR
-
-Counts are modelled as ZINB. Weights are posterior probabilities that a count belongs to the count component given that the count and library size is observed. Parameters are estimated using EM algorithm. See http://www.biorxiv.org/content/early/2017/06/30/157982 for more details.
-
-### zingeR-edgeR
-```{r}
-zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
-  d <- DGEList(counts)
-  d <- suppressWarnings(edgeR::calcNormFactors(d))
-  design <- model.matrix(~ group)
-  weights <- zeroWeightsLS(counts = d$counts, design = design, maxit = 200,
-                           normalization = "TMM", verbose = F)
-  d$weights <- weights
-  d <- estimateDisp(d, design)
-  plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
-  fit <- glmFit(d,design)
-  lrt <- glmWeightedF(fit, coef = 2, independentFiltering = TRUE)
-  cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
-}
-```
-
-### zingeR-DESeq2
-```{r}
-zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
-  colData <- data.frame(group = group)
-  design <- model.matrix(~ group)
-  dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData,
-                                design = ~group)
-  weights <- zeroWeightsLS(counts = counts, design = design, maxit = 200,
-                           normalization = "DESeq2_poscounts", colData = colData,
-                           designFormula = ~group, verbose = F)
-  assays(dse)[["weights"]] <- weights
-  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior = TRUE, useT = TRUE,
-                        df = rowSums(weights) - 2)
-  rr <- results(dse)
-  cbind(pval = rr$pvalue, padj = rr$padj)
-}
-```
-
-### zingeR-limma-voom-filtered
-```{r}
-zingeR_limma <- function(counts, group, ylim = NULL, xlim = NULL){
-  design <- model.matrix(~group)
-  nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- zeroWeightsLS(counts=counts, design=design, maxit = 200,
-                               verbose = FALSE)
-  y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
-            weights = zeroWeights)
-  y$weights <- y$weights*zeroWeights
-  fit <- lmFit(y, design, weights=y$weights)
-  fit$df.residual <- rowSums(zeroWeights) - ncol(design)
-  fit <- eBayes(fit)
-  tt <- topTable(fit,coef=2,n=nrow(counts), sort.by = "none")
-  pval <- tt$P.Value
-  baseMean = unname(rowMeans(sweep(counts,2,nf,FUN="*")))
-  hlp <- pvalueAdjustment_kvdb(baseMean=baseMean, pValue=pval)
-  padj <- hlp$padj
   cbind(pval = pval, padj = padj)
 }
 ```
@@ -403,7 +328,7 @@ zinbwave_limma <- function(counts, group, zinb){
 # Results
 
 ```{r core}
-core <- SummarizedExperiment(simDataIslam$counts,
+core <- SummarizedExperiment(simData$counts,
                              colData = data.frame(grp = grp))
 ```
 
@@ -420,15 +345,12 @@ load('zinb-genewise-disp-fc2.rda')
 ```
 
 # Compare dispersion estimates
-```{r islamDispFC2, warning=FALSE}
-counts = simDataIslam$counts
+```{r tenxDispFC2, warning=FALSE}
+counts = simData$counts
 myfct = list(DESeq2 = DESeq2, 
              edgeR = edgeR, 
              limmavoom = limma,
-             MAST = MAST,
-             zingeR_DESeq2 = zingeR_DESeq2,
-             zingeR_edgeR = zingeR_edgeR,
-             zingeR_limmavoom = zingeR_limma)
+             MAST = MAST)
 
 par(mfrow = c(2,2))
 ylim = c(0, 11)
@@ -451,31 +373,13 @@ res = lapply(res, as.data.frame)
 
 ## Compare weights estimates
 
-```{r zingerEdgerWeights}
-d=DGEList(simDataIslam$counts)
-d=suppressWarnings(calcNormFactors(d))
-design=model.matrix(~grp)
-zingeR_edgeR_weights <- zeroWeightsLS(counts=d$counts, design=design,
-                                      normalization="TMM", verbose = F)
-```
-
-```{r zingerDESeq2Weights}
-colData <- data.frame(grp = grp)
-design <- model.matrix(~ grp)
-zingeR_DESeq2_weights <- zeroWeightsLS(counts = counts, design = design, 
-                           normalization = "DESeq2_poscounts", colData = colData,
-                           designFormula = ~grp, verbose = F)
-```
-
 ```{r zinbwaveW}
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
 zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
 ```
 
-```{r islamWeightsFC2}
-par(mfrow=c(2,2))
-hist(zingeR_edgeR_weights, main='zingeR_edgeR', xlab = 'Weights')
-hist(zingeR_DESeq2_weights, main='zingeR_DESeq2', xlab = 'Weights')
+```{r tenxWeightsFC2}
+par(mfrow=c(2,1))
 hist(zinbwave_c_weights, main ='ZINB-WaVE, common dispersion', xlab = 'Weights')
 hist(zinbwave_g_weights, main ='ZINB-WaVE, genewise dispersion', xlab = 'Weights')
 par(mfrow=c(1,1))
@@ -491,11 +395,11 @@ abline(a=0,b=1)
 
 
 ## nDE, TPR, FDR (pvalue = 0.05)
-```{r islamTableFC2, results = 'asis'}
+```{r tenxTableFC2, results = 'asis'}
 listRates = lapply(res, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
-  TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
-  FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
+  TPR = mean(simData$indDE %in% which( y$padj <= 0.05))
+  FPR = mean(which(y$padj <= 0.05) %in% simData$indNonDE)
   c(nDE = nDE, TPR = TPR, FPR = FPR)
 })
 
@@ -514,10 +418,10 @@ kable(df)
 ## TPR vs FDR
 ```{r truth}
 trueDE = rep(0, nTags)
-trueDE[simDataIslam$indDE] = 1
+trueDE[simData$indDE] = 1
 ```
 
-```{r islamROCfc2zinbwave}
+```{r tenxROCfc2zinbwave}
 reszinb = res[c('ZINB-WaVE_DESeq2_common', 'ZINB-WaVE_edgeR_common',
                  'ZINB-WaVE_limmavoom_common', 'ZINB-WaVE_DESeq2_genewise',
                  'ZINB-WaVE_edgeR_genewise', 'ZINB-WaVE_limmavoom_genewise')]
@@ -538,7 +442,7 @@ plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
         axis.title.y = element_text(size = 15))
 ```
 
-```{r islamROCfc2}
+```{r tenxROCfc2}
 res10 = res[1:10]
 names(res10) = gsub('_common', '', names(res10))
 pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res10, '[[', 1))),
@@ -580,7 +484,7 @@ plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
 
 ## Distribution of pvalues
 
-```{r islamPvaluesFC2zinbwave}
+```{r tenxPvaluesFC2zinbwave}
 ylim = c(0, 3000)
 par(mfrow = c(2,3))
 hist = lapply(c(8:13), function(i){
@@ -589,7 +493,7 @@ hist = lapply(c(8:13), function(i){
 par(mfrow = c(1,1))
 ```
 
-```{r islamPvaluesFC2}
+```{r tenxPvaluesFC2}
 ylim = c(0, 3000)
 par(mfrow = c(3,3))
 hist = lapply(c(1:3, 5:10), function(i){

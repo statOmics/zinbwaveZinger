@@ -316,8 +316,8 @@ names(namesAlgos) <- namesAlgos
 nreps <- 10
 ```
 
-```{r}
-res <- lapply(1:nreps, function(i) {
+```{r,eval=FALSE}
+res <- lapply(7:nreps, function(i) {
     cat(i," ")
     eLoop <- eset[,as.numeric(subsets[i,])]
     cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
@@ -343,7 +343,7 @@ res <- lapply(1:nreps, function(i) {
 })
 ```
 
-Question: In zingeR preprint, a gene is said to be positively DE is its pvalue is lower than 0.05. Should not we be looking at the adjusted pvalue instead? Or we are looking at the number of false discoveries when multiple testing is not used?
+
 ```{r mocksBoxplot}
 hlp=lapply(res,function(replication){
   lapply(replication,function(method){
