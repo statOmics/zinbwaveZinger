@@ -2,8 +2,8 @@
 title: "Simulations from Islam dataset, fold change 2"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
-output: 
-  html_document: 
+output:
+  html_document:
     fig_height: 7
     fig_width: 7
     toc: yes
@@ -54,19 +54,18 @@ The scRNA-seq simulation is based on the Islam mouse dataset, which compares 48 
 
 ## Simulating from zingeR framework
 
-To simulate a scRNA-seq dataset, we use the simulation framework described in zingeR paper (http://www.biorxiv.org/content/early/2017/06/30/157982). Positive and zero counts are separately simulated using a Hurdle model.  
+To simulate a scRNA-seq dataset, we use the simulation framework described in zingeR paper (http://www.biorxiv.org/content/early/2017/06/30/157982). Positive and zero counts are separately simulated using a Hurdle model.
 
 - Positive counts. Removing the zeros, mean expression and dispersion are estimated genewise ($\lambda_g$ and $\phi_g$). Then, these estimated parameters are used to simulate positive counts using a ZTNB with mean $\hat \mu_{gi} = \hat \lambda_{gi} N_i$ and dispersion $\hat \phi_g$ where $N_i$ is the library size samples from the real dataset.
 
-- Zero counts: for each gene, simulated using a binomial distribution with parameters estimated from real dataset $p_g = \frac{\sum_{i=1}^n p_{gi}}{n}$ where $p_{ig}$ is estimated from a function depending on the average log CPM $A_g$ of a gene and the library size $N_i$ (semiparametric additive logistic regression model).   
+- Zero counts: for each gene, simulated using a binomial distribution with parameters estimated from real dataset $p_g = \frac{\sum_{i=1}^n p_{gi}}{n}$ where $p_{ig}$ is estimated from a function depending on the average log CPM $A_g$ of a gene and the library size $N_i$ (semiparametric additive logistic regression model).
 
 ```{r data}
 #code from https://github.com/statOmics/zingeR/blob/master/vignettes/zingeRVignette_v2.Rmd
 data(islamEset, package = "zingeR")
 islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
 cellType=pData(islamEset)[,"cellType"]
-paramsIslam = getDatasetZTNB(counts = islamHlp, 
-                             design = model.matrix(~ cellType))
+paramsIslam = getDatasetMoMPositive(counts = islamHlp)
 ```
 
 ```{r sims}
@@ -84,15 +83,6 @@ simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 verbose = TRUE, params = paramsIslam,
                                 lib.size = libSizes)
 simDataIslam$counts[1:5,1:5]
-## empirical lambda seems to do much better. but the means in general were shown to be unbiased??
-## or use model-based but normalize to 1?
-par(mfrow=c(1,3))
-plot(x=log(libSizes),y=log(colSums(simDataIslam$counts)),xlab="expected", ylab="simulated", main="ZTNB based, lambda normalized") ; abline(0,1,col=2)
-plot(x=log(libSizes),y=log(colSums(simDataIslamEmprical$counts)),xlab="expected", ylab="simulated", main="empirical") ; abline(0,1,col=2)
-plot(x=log(libSizes),y=log(colSums(simDataIslamModelBased$counts)),xlab="expected", ylab="simulated", main= "ZTNB based") ; abline(0,1,col=2)
-
-plot(x=log(rowMeans(sweep(simDataIslam$Lambda,1,FUN="*",STATS=libSizes))), y=log(rowMeans(simDataIslam$counts)), xlab="expected mean", ylab="simulated mean") ; abline(0,1,col=2)
-
 
 # BCV plots
 dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
@@ -102,17 +92,20 @@ d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataIslam$counts)))
 d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
 
 par(mfrow=c(1,2))
-plotBCV(dOrig,ylim=c(0,13), xlim=c(4,16))
-plotBCV(d,ylim=c(0,13), xlim=c(4,16))
+plotBCV(dOrig,ylim=c(0,13), xlim=c(2,16), main="real dataset")
+plotBCV(d,ylim=c(0,13), xlim=c(2,16), main="simulated dataset")
 par(mfrow=c(1,1))
 
 # association of library size with zeros
-plot(x=log(colSums(islamHlp)), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,13))
+plot(x=log(colSums(islamHlp)), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,15), ylim=c(0.2,1))
 points(x=log(colSums(simDataIslam$counts)), y=colMeans(simDataIslam$counts==0), col=2)
+legend("bottomleft", c("real", "simulated"), col=1:2, pch=1)
 
 # association of aveLogCPM with zeros
 plot(x=edgeR::aveLogCPM(islamHlp), y=rowMeans(islamHlp==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
 points(x=edgeR::aveLogCPM(simDataIslam$counts), y=rowMeans(simDataIslam$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
+legend("bottomleft", c("real", "simulated"), col=1:2, pch=16)
+
 ```
 
 # Methods
@@ -165,19 +158,41 @@ limma <- function(counts, group, ylim = NULL, xlim = NULL){
 ## scRNA-seq methods
 ### MAST
 ```{r}
-MAST <- function(counts, group, ylim = NULL, xlim = NULL){
-  tpm <- counts * 1e6 / colSums(counts) 
-  sca <- FromMatrix(tpm, cData = data.frame(group = group))
-  ngeneson <- apply(exprs(sca), 1, function(x) mean(x > 0))
-  CD <- cData(sca)
+### copied code from FPR_mocks.Rmd on September 14, 2017.
+MAST <- function(e){
+  require(MAST)
+  counts <- exprs(e)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,
+                    cData=data.frame(group=pData(e)$condition,
+                                     pickingSession=pData(e)$pickingSession))
+
+  # Adaptive thresholding from MAST vignette
+  freq_expressed <- 0.2
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
+                                     conditions = pData(e)$condition)
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  expressed_genes <- freq(sca) > freq_expressed
+  sca <- sca[expressed_genes,]
+
+  ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
+  CD <- colData(sca)
   CD$ngeneson <- ngeneson
-  CD$cngeneson <- CD$ngeneson - mean(ngeneson)
-  cData(sca) <- CD
-  fit <- zlm(~ group + ngeneson, sca = sca)
-  lrFit <- lrTest(fit, 'group')
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group + pickingSession, sca = sca,
+             method = "bayesglm", ebayes = TRUE)
+  L <- matrix(0, nrow = ncol(coef(fit, "D")))
+  rownames(L) <- colnames(coef(fit, "D"))
+  L["groupB",] <- 1
+  lrFit <- lrTest(fit, hypothesis = L)
   pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
   padj <- p.adjust(pval, method = "BH")
-  cbind(pval = pval, padj = padj)
+  list(pvals = pval, padj = padj, logfc = NA)
 }
 ```
 
@@ -188,6 +203,7 @@ Counts are modelled as ZINB. Weights are posterior probabilities that a count be
 ### zingeR-edgeR
 ```{r}
 zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(zingeR)
   d <- DGEList(counts)
   d <- suppressWarnings(edgeR::calcNormFactors(d))
   design <- model.matrix(~ group)
@@ -205,6 +221,7 @@ zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
 ### zingeR-DESeq2
 ```{r}
 zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(zingeR)
   colData <- data.frame(group = group)
   design <- model.matrix(~ group)
   dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData,
@@ -225,6 +242,7 @@ zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
 ### zingeR-limma-voom-filtered
 ```{r}
 zingeR_limma <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(zingeR)
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
   zeroWeights <- zeroWeightsLS(counts=counts, design=design, maxit = 200,
@@ -256,7 +274,7 @@ computeZinbwaveWeights <- function(zinb, counts){
   theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
   nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
   t(zinbwg)
 }
 ```
@@ -336,8 +354,8 @@ load('zinb-genewise-disp-fc2.rda')
 # Compare dispersion estimates
 ```{r islamDispFC2, warning=FALSE}
 counts = simDataIslam$counts
-myfct = list(DESeq2 = DESeq2, 
-             edgeR = edgeR, 
+myfct = list(DESeq2 = DESeq2,
+             edgeR = edgeR,
              limmavoom = limma,
              MAST = MAST,
              zingeR_DESeq2 = zingeR_DESeq2,
@@ -361,6 +379,7 @@ par(mfrow = c(1,1))
 
 ```{r}
 res = lapply(res, as.data.frame)
+for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 ```
 
 ## Compare weights estimates
@@ -376,7 +395,7 @@ zingeR_edgeR_weights <- zeroWeightsLS(counts=d$counts, design=design,
 ```{r zingerDESeq2Weights}
 colData <- data.frame(grp = grp)
 design <- model.matrix(~ grp)
-zingeR_DESeq2_weights <- zeroWeightsLS(counts = counts, design = design, 
+zingeR_DESeq2_weights <- zeroWeightsLS(counts = counts, design = design,
                            normalization = "DESeq2_poscounts", colData = colData,
                            designFormula = ~grp, verbose = F)
 ```
@@ -472,7 +491,7 @@ colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
                                    facetted = FALSE)
 
-p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
+p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
                        linewidth = .5, xaxisrange = c(0, .5)) +
   theme(axis.text.x = element_text(size = 10),
         axis.text.y = element_text(size = 10),
@@ -481,7 +500,7 @@ p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .
         legend.text=element_text(size=7)) + theme(legend.position="none")
 
 orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
-p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
+p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
                        linewidth = .5, xaxisrange = c(0, .5)) +
   theme(legend.text=element_text(size=7)) +
   scale_color_manual(labels = names(colsCobra)[orderLegend],
