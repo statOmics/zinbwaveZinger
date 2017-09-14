@@ -1,0 +1,74 @@
+---
+title: "Create SingleCellExperiment object for Usoskin dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(SingleCellExperiment)
+library(openxlsx)
+library(Biobase)
+set.seed(8283)
+```
+
+Data file can be downloaded from http://linnarssonlab.org/drg/ by clicking on "External resource Table 1" or using the code below (need internet connexion).
+
+The problem is that the raw counts are not provided. They only provide the normalized RPM counts or the sra files.
+
+```{r}
+#url = 'https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE59739&format=file&file=GSE59739%5FDataTable%2Etxt%2Egz'
+# same dataset as ...
+url = 'https://storage.googleapis.com/linnarsson-lab-www-blobs/blobs/drg/Usoskin%20et%20al.%20External%20resources%20Table%201.xlsx'
+fileName = 'usoskin.txt.gz'
+download.file(url, fileName)
+system(sprintf('gunzip %s', fileName))
+fileName = gsub('.gz', '', fileName)
+data = read.table(fileName, sep = '\t', header = FALSE)
+dim(data)
+data[1:10,1:5]
+head(data, 10)
+```
+
+```{r}
+counts <- openxlsx::read.xlsx(xlsxFile='usoskin.xlsx', sheet=2, rows=12:25345, cols=10:873, colNames=FALSE)
+
+## rowData
+pData <- openxlsx::read.xlsx(xlsxFile="/Users/koenvandenberge/Dropbox/PhD/Research/singleCell/usoskin/Usoskin et al. External resources Table 1.xlsx", sheet=2, rows=1:10, cols=9:873, colNames=FALSE)
+pData <- t(pData)
+colnames(pData) <- pData[1,]
+pData=pData[-1,]
+rownames(pData) <- colnames(data)
+pData <- AnnotatedDataFrame(as.data.frame(pData))
+
+## feature Data
+fData <- openxlsx::read.xlsx(xlsxFile="/Users/koenvandenberge/Dropbox/PhD/Research/singleCell/usoskin/Usoskin et al. External resources Table 1.xlsx", sheet=2, rows=12:25345, cols=1, colNames=FALSE)
+fData <- AnnotatedDataFrame(fData)
+
+
+eset <- ExpressionSet(assayData=as.matrix(data), phenoData=pData, featureData=fData)
+
+## only use single-cell samples
+eset <- eset[,pData(eset)$Content=="cell"]
+
+## only use neuronal cells
+sum(pData(eset)[,7] == "NF" | pData(eset)[,7] == "NP" | pData(eset)[,7] == "PEP" | pData(eset)[,7] == "TH") # the 622 cells used in the paper
+eset= eset[,(pData(eset)[,7] == "NF" | pData(eset)[,7] == "NP" | pData(eset)[,7] == "PEP" | pData(eset)[,7] == "TH")]
+
+## keep in cpm for MAST analysis
+esetCpm=eset
+save(esetCpm,file="~/Dropbox/phdKoen/singleCell/githubPaper/singleCellPaper/case/esetUsoskinCpm.RData")
+
+
+## filter genes with no expression, convert back to counts
+exprs(eset) = round(sweep(exprs(eset),2,STATS=as.numeric(as.character(pData(eset)$Reads)),FUN="*")/1e6)
+eset=eset[rowSums(exprs(eset))>0,]
+save(eset,file="~/Dropbox/phdKoen/singleCell/githubPaper/singleCellPaper/case/esetUsoskin.RData")
+```

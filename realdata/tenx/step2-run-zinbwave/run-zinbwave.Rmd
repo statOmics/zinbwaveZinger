@@ -1,0 +1,254 @@
+---
+title: "Dimensionality reduction using zinbwave - tenX dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(matrixStats) #for fct rowVars
+library(clusterExperiment) # pal = colors of the clusters
+library(scater) # calculateQC
+library(rARPACK) # fastpca
+set.seed(8283)
+```
+
+```{r}
+library(BiocParallel)
+library(doParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to perform dimensionality reduction using ZINB-WaVE.
+
+# Load data 
+
+Load the data created by running create-se-object.Rmd
+
+```{r data}
+load('../data/tenX_pbmc4k.rda')
+se
+```
+
+I prefer to use a matrix as the count assay because it is compatible with more functions
+```{r}
+class(assay(se))
+assay(se) = as.matrix(assay(se))
+class(assay(se))
+```
+
+Let's remove genes with only zeros 
+```{r}
+nzeros = sum(rowSums(assay(se)) == 0)
+```
+`r nzeros` genes have only zero counts. Let's remove these genes.
+
+```{r}
+se = se[rowSums(assay(se)) > 0 , ]
+dim(se)
+```
+
+'r nrow(se)' genes are kept.
+
+# Zinbwave
+
+Let's first look at the 1,000 most variable genes. It reduces the computation and is usually enough to capture the biology.
+
+```{r}
+vars <- rowVars(log1p(assay(se)))
+names(vars) <- rownames(se)
+vars <- sort(vars, decreasing = TRUE)
+vargenes <- names(vars)[1:1000]
+plot(sqrt(vars), main = 'Genewise standard deviation for log counts')
+abline(v = 1000, col = 'red')
+
+se <- se[vargenes,]
+```
+
+
+```{r,eval=FALSE}
+system.time(zinb_res <- zinbFit(se, K = 3, epsilon = 10000))
+save(zinb_res, file = 'tenx_pbmc4k_zinb_k3.rda')
+```
+
+```{r}
+load('tenx_pbmc4k_zinb_k3.rda')
+```
+
+```{r}
+pal <- clusterExperiment::bigPalette
+```
+
+```{r}
+W <- getW(zinb_res)
+clus = colData(se)$graphclust
+plot(W, pch = 19, col = pal[clus], main = 'W')
+pairs(W, pch = 19, col = pal[clus])
+zinb_df <- data.frame(W1 = W[,1], W2 = W[,2], W3 = W[,3],
+                      Cluster=as.factor(clus))
+```
+
+```{r}
+makeGetExpression <- function(se){
+  function(x){
+    log1p(assay(se)[which(rowData(se)[, 'symbol'] == x), ])
+  }
+}
+markers = c(tcells = "CD3D",
+            unknown = "IL7R",
+            nk = "NKG7",
+            myeloid = "S100A8",
+            memT = "CCR10",
+            regT = "TNFRSF18",
+            naiveT = "ID3",
+            megakaryocytes = "PF4")
+
+getExpression = makeGetExpression(se)
+geneExpr = lapply(markers, getExpression)
+geneExpr = do.call(cbind, geneExpr[sapply(geneExpr, length) > 0])
+zinb_df = cbind(zinb_df, geneExpr)
+
+ggplot(aes(W1, W2, colour=tcells), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=unknown), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=nk), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=myeloid), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+```
+
+## Include QC in X
+
+Compute quality control measures and include first two PCs in X.
+
+```{r}
+sce = as(se, "SingleCellExperiment")
+sce <- calculateQCMetrics(sce)
+qc <- colData(sce)[, c(3, 5, 7:10)]
+qc = as.matrix(qc)
+head(qc, 2)
+qcpca <- prcomp(qc, scale. = TRUE, center = TRUE)
+X <- model.matrix(~ qcpca$x[, 1:2])
+```
+
+```{r,eval=FALSE}
+system.time(zinb_qc <- zinbFit(se, K = 3, X = X, epsilon = 10000))
+save(zinb_qc, file = 'tenx_pbmc4k_zinb_k3_qc.rda')
+```
+
+```{r}
+load('tenx_pbmc4k_zinb_k3_qc.rda')
+```
+
+```{r}
+Wqc <- getW(zinb_qc)
+plot(Wqc, pch = 19, col = pal[clus], main = 'W')
+pairs(Wqc, pch = 19, col = pal[clus])
+zinb_df <- data.frame(W1 = Wqc[,1], W2 = Wqc[,2], W3 = Wqc[,3],
+                      Cluster=as.factor(clus))
+```
+
+```{r}
+ggplot(aes(W1, W2, colour=tcells), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=unknown), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=nk), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(W1, W2, colour=myeloid), data = zinb_df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+```
+
+
+```{r}
+cors <- lapply(1:3, function(i) abs(cor(W[,i], qc)))
+cors <- unlist(cors)
+bars <- data.frame(AbsoluteCorrelation=cors,
+                   QC=rep(stringr::str_to_lower(colnames(qc)), 3),
+                   Dimension=as.factor(rep(1:3, each=ncol(qc))))
+
+bars %>%
+  ggplot(aes(Dimension, AbsoluteCorrelation, group=QC, fill=QC)) + 
+  geom_bar(stat="identity", position='dodge') + 
+  scale_fill_manual(values=pal) + ylim(0, 1) + 
+  ggtitle("Correlation bw W and QC (before adjusting)")
+```
+
+```{r}
+cors <- lapply(1:3, function(i) abs(cor(Wqc[,i], qc)))
+cors <- unlist(cors)
+bars <- data.frame(AbsoluteCorrelation=cors,
+                   QC=rep(stringr::str_to_lower(colnames(qc)), 3),
+                   Dimension=as.factor(rep(1:3, each=ncol(qc))))
+
+bars %>%
+  ggplot(aes(Dimension, AbsoluteCorrelation, group=QC, fill=QC)) + 
+  geom_bar(stat="identity", position='dodge') + 
+  scale_fill_manual(values=pal) + ylim(0, 1) + ggtitle("Correlation bw W and QC (after adjusting)")
+```
+
+
+## PCA
+
+To perform PCA, we need to normalize the data. It seems that TC normalization is the most used normalization method with 10X-genomics data so we use this normalization method here. Normalization is performed on all the genes and then we keep only the 1000 most variable genes.
+
+```{r}
+norm10x = function (ei){
+  sums = colSums(ei)
+  eo = t(t(ei)*median(sums)/sums)
+  return(eo)
+}
+
+fastpca <- function(expr, scale=FALSE) {
+  k <- 50
+  svd_raw <- svds(scale(t(expr), center=TRUE, scale=scale),
+                  k=k, nu=k, nv=0)
+  pc_raw <- svd_raw$u %*% diag(svd_raw$d[1:k])
+  return(pc_raw)
+}
+
+# reload se to get all the genes
+load('../data/tenX_pbmc4k.rda')
+assay(se) = as.matrix(assay(se))
+# remove genes with only zero counts for normalization
+tc <- norm10x(assay(se)[rowSums(assay(se)) > 0, ]) 
+pc_tc <- fastpca(log1p(tc[vargenes,]))
+
+cors <- lapply(1:3, function(i) abs(cor(pc_tc[,i], qc)))
+cors <- unlist(cors)
+bars <- data.frame(AbsoluteCorrelation=cors,
+                   QC=rep(stringr::str_to_lower(colnames(qc)), 3),
+                   Dimension=as.factor(rep(1:3, each=ncol(qc))))
+
+bars %>%
+  ggplot(aes(Dimension, AbsoluteCorrelation, group=QC, fill=QC)) + 
+  geom_bar(stat="identity", position='dodge') + 
+  scale_fill_manual(values=pal) + ylim(0, 1) + ggtitle("Correlation bw PCA and QC")
+
+plot(pc_tc[,1:2], pch=19, col=pal[clus])
+pairs(pc_tc[,1:3], pch=19, col=pal[clus])
+
+save(pc_tc, file = "tenx_pbmc4k_pca.rda")
+```
+
+
+
+
+

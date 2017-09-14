@@ -1,0 +1,38 @@
+---
+title: "Clustering using ZINB-WaVE - Usoskin dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+set.seed(8283)
+ncores <- 2
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to perform dimensionality reduction (ZINB-WaVE), clustering (kmeans or clusterExperiment), DE analysis between found clusters (zinbwave-zingeR method). We then want to compare the DE genes with DE genes found in Usoskin paper.
+
+# Data
+```{r data}
+path = '~/Documents/scRNAseq/gitrepo/zingeRPaper/singleCellPaper/case/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+
+file = paste0(path, "fpr/subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+```

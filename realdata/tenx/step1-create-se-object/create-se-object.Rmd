@@ -1,0 +1,102 @@
+---
+title: "Create SummarizedExperiment object for 10x-genomics dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(SummarizedExperiment)
+set.seed(930383) #just in case
+```
+
+# Download data
+
+Let's use the 4k PBMCs from 10x genomics data and cellrangeRkit R package to download the data. Thanks Davide Risso for your help on that.
+
+```{r data}
+install_cellranger = FALSE
+if (install_cellranger){
+  url = "http://cf.10xgenomics.com/supp/cell-exp/rkit-install-2.0.0.R"
+  source(url)
+}
+library(cellrangerRkit)
+path <- "./"
+if(!file.exists(paste0(path, "/outs"))) {
+  host = "http://cf.10xgenomics.com/samples/cell-exp/1.3.0/"
+  download_sample(sample_name="pbmc4k",sample_dir=path,host=host)
+}
+pbmc <- load_cellranger_matrix(path)
+analysis_results <- load_cellranger_analysis_results(path)
+dim(pbmc)
+```
+
+There are `r nrow(pbmc)` genes and `r ncol(pbmc)` cells.
+
+```{r}
+counts = exprs(pbmc) # expression matrix
+counts[1:5,1:5]
+head(fData(pbmc)) # data frame of genes
+head(pData(pbmc)) # data frame of cell barcodes
+```
+
+# Analysis by 10X-genomics
+
+10X-genomics teams performed "graph-based clustering", provided the labels and tsne coordinates in the object we downloaded. We will use these labels and coordinate to give a first look at the data.
+
+```{r}
+cl <- analysis_results[["clustering"]][["graphclust"]][,'Cluster']
+names(cl) <- analysis_results[["clustering"]][["graphclust"]][,'Barcode']
+cl <- cl[colnames(pbmc)]
+```
+
+```{r}
+pal <- clusterExperiment::bigPalette
+plot(analysis_results[['tsne']][,2:3], col = pal[cl],
+     xlim = c(-40, 60), ylim = c(-60, 40))
+legend('bottomright', legend=unique(cl), col=unique(pal[cl]),lty=1, 
+       cex = 0.5)
+```
+
+# Marker genes
+Let's look at the expression of some well-known marker genes 
+```{r}
+df = data.frame(tsne1 = analysis_results[['tsne']][,2],
+                tsne2 = analysis_results[['tsne']][,3],
+                Cluster=as.factor(cl))
+df$CD3D <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "CD3D"),]) #t cell
+df$IL7R <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "IL7R"),]) 
+df$NKG7 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "NKG7"),]) #nk cells
+df$S100A8 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "S100A8"),]) #myeloid cells
+df$CCR10 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "CCR10"),]) #mem t cells
+df$TNFRSF18 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "TNFRSF18"),]) #reg t cells
+df$ID3 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "ID3"),]) #naive t cells
+df$PF4 <- log1p(exprs(pbmc)[which(fData(pbmc)[,2] == "PF4"),]) #megakaryocytes
+
+ggplot(aes(tsne1, tsne2, colour=CD3D), data = df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(tsne1, tsne2, colour=NKG7), data = df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+
+ggplot(aes(tsne1, tsne2, colour=S100A8), data = df) + 
+  geom_point() + scale_colour_gradient(low="blue", high="yellow")
+```
+
+# Create SingleCellExperiment object
+
+```{r}
+se = SummarizedExperiment(assays = list(counts = exprs(pbmc)),
+                          rowData = fData(pbmc),
+                          colData = pData(pbmc))
+colData(se)[, 'graphclust'] = cl
+se
+save(se, file = '../data/tenX_pbmc4k.rda')
+```
