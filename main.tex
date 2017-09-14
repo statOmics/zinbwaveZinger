@@ -76,6 +76,7 @@
 
 %%%% remove this line when submitting
 \newcommand{\fanny}[1]{\textcolor{blue}{*** FP: #1}}
+\newcommand{\koen}[1]{\textcolor{olive}{*** KVdB: #1}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                             %%
@@ -294,7 +295,7 @@
 Dropout in single cell RNA-seq (scRNA-seq) applications causes many transcripts to go undetected. 
 It induces excess zero counts, which leads to power issues in differential expression (DE) analysis and has triggered the development of bespoke scRNA-seq DE tools that cope with zero-inflation.
 Recent evaluations, however, have shown that dedicated scRNA-seq tools provide no advantage compared to traditional bulk RNA-seq tools.
-We introduce zingeR, a zero-inflated negative binomial model that identifies excess zero counts and generates observation weights to unlock bulk RNA-seq pipelines for zero-inflation, boosting performance in scRNA-seq differential expression analysis.
+We introduce a weighting strategy based on the ZINB-WaVE model that identifies excess zero counts and generates observation weights to unlock bulk RNA-seq pipelines for zero-inflation, boosting performance in scRNA-seq differential expression analysis.
 \end{abstract}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -355,6 +356,7 @@ We introduce zingeR, a zero-inflated negative binomial model that identifies exc
 \section*{Background}
 
 \fanny{More clearly define the use case: assessing differential expression between cell types or homogeneous groups of cells.}\\
+\koen{Write something about bursting.}\\
 %introduction, rna-seq
 Transcriptomics has become one of the standard tools in modern biology to unravel the molecular basis of biological processes and diseases. One of the most common applications of transcriptome profiling is the discovery of differentially expressed (DE) genes, which exhibit changes in average expression levels across conditions \cite{Love2014, Robinson2010a, Law2014}. Over the last decade, RNA-seq has become the standard technology for transcriptome profiling enabling researchers to study average gene expression over bulks of cells \cite{Wang2009, Goodwin2016}.  The advent of single cell RNA-seq (scRNA-seq) enabled high-throughput transcriptome profiling of single cells and disrupted research on developmental trajectories, cell-to-cell heterogeneity and the discovery of novel cell types, amongst others \cite{Lonnberg2017, Buettner2015, Patel2014, Kolodziejczyk2015, Li2017, Usoskin2014}.
  
@@ -441,18 +443,8 @@ However, also in scRNA-seq applications, a decrease in dispersion estimates is a
 
 {\color{blue} *** FP: Messages:
 \begin{enumerate}
-\item High sensitivity and specificity on scRNA-seq simulated data
-  \begin{enumerate}
-  \item Comparison between the different methods (ROC and pvalue distrib) for 10X and Islam datasets. From our previous plots, our method should be the best followed by MAST with the adaptive thresholding followed by the bulk rna seq tools (edgeR, DESeq2,limmavoom). See Figure for fold change 2 and suppl. fig. for fold change 3.
+  \item High sensitivity and specificity on scRNA-seq simulated data. Comparison between the different methods (ROC and pvalue distrib) for 10X and Islam datasets. From our previous plots, our method should be the best followed by MAST with the adaptive thresholding followed by the bulk rna seq tools (edgeR, DESeq2,limmavoom). See Figure for fold change 2 and suppl. fig. for fold change 3.
   \item no big difference between genewise and common dispersion. See supplementary figures. Could be explained by no big diff in weights and disp. See supplementary figures. Genewise dispersion is 15 times slower than common. We think that common dispersion is a good approximation. This point could be moved to discussion eventually.
-  \end{enumerate}
-
-\item Controlled FDR at 0.05 on scRNA-seq simulated data
-  \begin{enumerate}
-  \item FDR is controlled on neuronal cells and 10X-genomics
-  \item Influence of epsilon on FPR and distribution pvalues. This point could be moved to discussion eventually.
-  \end{enumerate}
-
 \end{enumerate}
 }
 
@@ -496,12 +488,13 @@ Note, that the performance of all methods is still lower than in the bulk RNA-se
 
 \subsection*{Real data. Our method leads to biologically meaningful differentially expressed genes}
 
-\fanny{We would perform the clustering using zinbwave for the Usoskin. Move the FDR on mocks to the previous section as it is more a simulation that real data analysis. Add 10X-genomics analysis.}
-
 {\color{blue} Messages:
 \begin{enumerate}
-\item Usoskin case study. From Koen's email: It may be convincing to redo the clustering with ZINB-WaVE followed by subsequent DE between the discovered cell types, and check for previously undiscovered results/marker genes. This would illustrate our use-case and might help to convince Reviewer 2. From what I understand from the original paper, they adopted the following workow: In the original paper, they dened four main neuronal cell types based on an initial PCA clustering. Next, pairwise dierential expression analysis was performed between these four main clusters, and genes that are dierentially expressed in at least one comparison for a particular cell type are then used for additional iterative clustering analyses per main neuronal cell type. Since this work ow is a combination of dierential expression and clustering, it may be a good example to showcase the method. Dening new cell types ourselves may be dicult, but it would already be good to check if we nd extra/dierent subgroups within their dened cell types (for which we have the labels), based on our DE and clustering method.
-\item 10x-genomics case study.
+\item Controlled FDR at 0.05 on scRNA-seq simulated data: neuronal cells and 10X-genomics. Influence of epsilon on FPR and distribution pvalues. This last point could be moved to discussion eventually.
+
+\item New biology for Usoskin case study. From Koen's email: It may be convincing to redo the clustering with ZINB-WaVE followed by subsequent DE between the discovered cell types, and check for previously undiscovered results/marker genes. This would illustrate our use-case and might help to convince Reviewer 2. From what I understand from the original paper, they adopted the following workflow: In the original paper, they defined four main neuronal cell types based on an initial PCA clustering. Next, pairwise differential expression analysis was performed between these four main clusters, and genes that are differentially expressed in at least one comparison for a particular cell type are then used for additional iterative clustering analyses per main neuronal cell type. Since this work ow is a combination of differential expression and clustering, it may be a good example to showcase the method. Defining new cell types ourselves may be difficult, but it would already be good to check if we need extra/different subgroups within their defined cell types (for which we have the labels), based on our DE and clustering method.
+
+\item New biology 10x-genomics case study. Same as Usoskin case study
 \end{enumerate}
 }
 
@@ -531,7 +524,7 @@ In addition, a uniform p-value distribution is observed for zingeR\_edgeR in the
 
 \section*{Discussion}
 
-\fanny{Add time computation times to benchmark the different methods.\\}
+\fanny{Add computation times to benchmark the different methods.\\}
 We used default bulk RNA-seq normalization procedures and adopted positive counts normalization for DESeq2 \cite{McMurdie2013}, which has been shown to boost its performance.
 Novel normalization procedures have been developed for scRNA-seq data analysis (e.g. scran \cite{Lun2016a}), but a thorough comparison of normalization methods falls outside the scope of this contribution.
 The zingeR implementation, however, allows the user to supply custom normalization factors, which opens the zingeR data analysis workflow towards any normalization method that produces normalization factors or offsets.\\
