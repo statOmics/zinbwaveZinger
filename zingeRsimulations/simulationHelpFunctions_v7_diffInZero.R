@@ -270,7 +270,7 @@ reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
 
 
 
-getDatasetMoMPositive = function(counts, design, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=10){
+getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=10){
 
         #### estimate lambda and overdispersion based on ZTNB.
 	d <- DGEList(counts)
