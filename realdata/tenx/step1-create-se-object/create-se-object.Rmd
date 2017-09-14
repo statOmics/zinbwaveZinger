@@ -93,10 +93,37 @@ ggplot(aes(tsne1, tsne2, colour=S100A8), data = df) +
 # Create SingleCellExperiment object
 
 ```{r}
-se = SummarizedExperiment(assays = list(counts = exprs(pbmc)),
-                          rowData = fData(pbmc),
+counts = exprs(pbmc)
+```
+
+Let's remove genes with only zeros 
+```{r}
+nzeros = sum(rowSums(counts) == 0)
+```
+`r nzeros` genes have only zero counts. Let's remove these genes.
+
+```{r subsetse}
+counts = counts[rowSums(counts) > 0 , ]
+dim(counts)
+```
+
+'r nrow(counts)' genes are kept.
+
+```{r}
+counts = as.matrix(counts)
+rowData = fData(pbmc)[rownames(counts), ]
+se = SummarizedExperiment(assays = list(counts = counts),
+                          rowData = rowData,
                           colData = pData(pbmc))
 colData(se)[, 'graphclust'] = cl
 se
 save(se, file = '../data/tenX_pbmc4k.rda')
 ```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
+

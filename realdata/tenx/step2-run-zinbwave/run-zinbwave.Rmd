@@ -18,10 +18,11 @@ library(matrixStats) #for fct rowVars
 library(clusterExperiment) # pal = colors of the clusters
 library(scater) # calculateQC
 library(rARPACK) # fastpca
+library(dplyr)
 set.seed(8283)
 ```
 
-```{r}
+```{r par}
 library(BiocParallel)
 library(doParallel)
 NCORES <- 2
@@ -40,31 +41,11 @@ load('../data/tenX_pbmc4k.rda')
 se
 ```
 
-I prefer to use a matrix as the count assay because it is compatible with more functions
-```{r}
-class(assay(se))
-assay(se) = as.matrix(assay(se))
-class(assay(se))
-```
-
-Let's remove genes with only zeros 
-```{r}
-nzeros = sum(rowSums(assay(se)) == 0)
-```
-`r nzeros` genes have only zero counts. Let's remove these genes.
-
-```{r}
-se = se[rowSums(assay(se)) > 0 , ]
-dim(se)
-```
-
-'r nrow(se)' genes are kept.
-
 # Zinbwave
 
 Let's first look at the 1,000 most variable genes. It reduces the computation and is usually enough to capture the biology.
 
-```{r}
+```{r vars}
 vars <- rowVars(log1p(assay(se)))
 names(vars) <- rownames(se)
 vars <- sort(vars, decreasing = TRUE)
@@ -75,21 +56,20 @@ abline(v = 1000, col = 'red')
 se <- se[vargenes,]
 ```
 
-
 ```{r,eval=FALSE}
 system.time(zinb_res <- zinbFit(se, K = 3, epsilon = 10000))
 save(zinb_res, file = 'tenx_pbmc4k_zinb_k3.rda')
 ```
 
-```{r}
+```{r load}
 load('tenx_pbmc4k_zinb_k3.rda')
 ```
 
-```{r}
+```{r pal}
 pal <- clusterExperiment::bigPalette
 ```
 
-```{r}
+```{r w}
 W <- getW(zinb_res)
 clus = colData(se)$graphclust
 plot(W, pch = 19, col = pal[clus], main = 'W')
@@ -146,7 +126,7 @@ X <- model.matrix(~ qcpca$x[, 1:2])
 ```
 
 ```{r,eval=FALSE}
-system.time(zinb_qc <- zinbFit(se, K = 3, X = X, epsilon = 10000))
+system.time(zinb_qc <- zinbFit(se, K = 3, X = X, epsilon = 100000))
 save(zinb_qc, file = 'tenx_pbmc4k_zinb_k3_qc.rda')
 ```
 
@@ -158,8 +138,9 @@ load('tenx_pbmc4k_zinb_k3_qc.rda')
 Wqc <- getW(zinb_qc)
 plot(Wqc, pch = 19, col = pal[clus], main = 'W')
 pairs(Wqc, pch = 19, col = pal[clus])
-zinb_df <- data.frame(W1 = Wqc[,1], W2 = Wqc[,2], W3 = Wqc[,3],
-                      Cluster=as.factor(clus))
+zinb_df[,'W1'] = Wqc[,1]
+zinb_df[,'W2'] = Wqc[,2]
+zinb_df[,'W3'] = Wqc[,3]
 ```
 
 ```{r}
@@ -249,6 +230,10 @@ save(pc_tc, file = "tenx_pbmc4k_pca.rda")
 ```
 
 
+# Session Info
 
+```{r}
+sessionInfo()
+```
 
 
