@@ -1,0 +1,629 @@
+---
+title: "evaluate zingeR simulation variants"
+author: "Koen Van den Berge"
+date: "31 August 2017"
+output: html_document
+---
+
+R -e "rmarkdown::render('evaluateZingeRSims_v2_clean.Rmd')"
+
+
+```{r preprocess}
+setwd("~/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zingeRsimulations/evaluate/")
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(gamlss)
+library(gamlss.tr)
+library(Biobase)
+library(edgeR)
+library(scales)
+library(DESeq2)
+library(iCOBRA) # roc
+library(limma)
+library(genefilter) #filtered pvalues
+library(RColorBrewer)
+library(knitr)
+library(ggplot2)
+library(cowplot)
+library(MultiAssayExperiment)
+library(SummarizedExperiment)
+library(countsimQC)
+# use new simulation.
+#library(zingeR)
+source("../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
+# islam
+load("../../datasets/islam.rda")
+islamCompare = islam[rowSums(islam>0)>=1,]
+islam=islam[rowSums(islam>0)>=5,]
+cellType = unlist(lapply(strsplit(colnames(islam),split="_"),function(x) x[1]))
+set.seed(2)
+rowsIslam = sample(nrow(islamCompare),nrow(islam))
+dds_origIslam <- DESeqDataSetFromMatrix(countData = islamCompare[rowsIslam,],
+                                  colData = data.frame(group = cellType, sample = colnames(islam),
+                                                       row.names = colnames(islam),
+                                                       stringsAsFactors = FALSE),
+                                  design = ~ group)
+
+#GSE74596. downloaded from conquer.
+pathGSE74596 = "/Users/koenvandenberge/PhD_Data/singleCell/conquer/"
+mae <- readRDS(paste0(pathGSE74596,"GSE74596.rds"))
+mae <- updateObject(mae)
+pdata <- colData(mae)
+groupid <- "source_name_ch1"
+keepgroups <- c("Single_cell_RNA-seq_NKT0", "Single_cell_RNA-seq_NKT17")
+if (length(groupid) > 1) {
+ pdata[, paste(groupid, collapse = ".")] <- as.character(interaction(as.data.frame(pdata[, groupid])))
+ groupid <- paste(groupid, collapse = ".")
+}
+counts <- assays(experiments(mae)[["gene"]])[["count_lstpm"]]
+stopifnot(all(colnames(counts) == rownames(pdata)))
+keep <- which(pdata[, groupid] %in% keepgroups)
+counts <- round(counts[, keep])
+countsGSECompare <- counts[rowSums(counts > 0) >= 1, ]
+counts <- counts[rowSums(counts > 0) > 5, ]
+countsGSE=counts
+group <- as.character(pdata[keep, groupid])
+nrowEstcounts = nrow(countsGSE)
+set.seed(2)
+sampleRowsGSE = sample(1:nrow(countsGSECompare),nrowEstcounts, replace=FALSE)
+dds_origGSE74596 <- DESeqDataSetFromMatrix(countData = countsGSECompare[sampleRowsGSE,],
+                                  colData = data.frame(group = group, sample = colnames(counts), row.names = colnames(counts), stringsAsFactors = FALSE), design = ~ group)
+
+## trapnell
+trapnellAssay72 <- readRDS("/Users/koenvandenberge/PhD_Data/singleCell/conquer/GSE52529-GPL11154.rds")
+trapnellAssay72 = updateObject(trapnellAssay72)
+trapnellAssay <- readRDS("/Users/koenvandenberge/PhD_Data/singleCell/conquer/GSE52529-GPL16791.rds")
+trapnellAssay = updateObject(trapnellAssay)
+trapnellAssay48 <- trapnellAssay[,colData(trapnellAssay)[,"characteristics_ch1.1"] == "hour post serum-switch: 48"]
+countsTrapnell72 <- round(assay(experiments(trapnellAssay72)$gene,"count"))
+id48=colData(trapnellAssay)[,"characteristics_ch1.1"] == "hour post serum-switch: 48"
+countsTrapnell48 <- round(assay(experiments(trapnellAssay)$gene[,id48],"count"))
+#wells containing debris
+debris72 = colData(trapnellAssay72)[,"characteristics_ch1.2"]=="debris: TRUE"
+debris48 = colData(trapnellAssay48)[,"characteristics_ch1.2"]=="debris: TRUE"
+#wells that did not contain one cell
+one72 = colData(trapnellAssay72)[,"characteristics_ch1.4"]!="cells in well: 1"
+one48 = colData(trapnellAssay48)[,"characteristics_ch1.4"]!="cells in well: 1"
+# remove
+countsTrapnell72 = countsTrapnell72[,(!debris72 & !one72)]
+countsTrapnell48 = countsTrapnell48[,(!debris48 & !one48)]
+countsTrapnell <- cbind(countsTrapnell48,countsTrapnell72)
+countsTrapnellCompare = countsTrapnell[rowSums(countsTrapnell>0)>=1,]
+countsTrapnell <- countsTrapnell[rowSums(countsTrapnell>0)>9,] #expression in at least 10 out of 149 samples. Remains 24,576 genes and 149 samples.
+rm(trapnellAssay)
+timePoint=factor(c(rep(48,85),rep(72,64)))
+set.seed(2)
+rowsTrapnell = sample(nrow(countsTrapnellCompare),nrow(countsTrapnell))
+dds_origTrapnell <- DESeqDataSetFromMatrix(countData = countsTrapnellCompare[rowsTrapnell,],
+                                  colData = data.frame(group = timePoint, sample = colnames(countsTrapnell), row.names = colnames(countsTrapnell), stringsAsFactors = FALSE), design = ~ group)
+```
+
+
+# MoM estimation on positive counts only, including a bias correction for the mean.
+
+```{r}
+####### on positive counts
+getExprFraction = function(counts, offset){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  mean(countsModel/offsetModel)
+}
+
+getPhiMoMPositive = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    n=length(countsModel)
+    mu=mean(lambda*offsetModel)
+    phiMoM = ((1/(n-1)*sum((countsModel-mu)^2)) - mu) / mu^2
+    return(phiMoM)
+}
+
+
+reEstimateExprFraction = function(counts, offset, phi, lambda){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  #lambda=countsModel/offsetModel
+  mean(lambda*(1-dnbinom(x=0,mu=lambda*offsetModel,size=1/phi)))
+}
+
+reEstimatePhiMoM = function(counts, offset, lambda){
+  countsModel = counts[counts>0]
+  offsetModel=offset[counts>0]
+  n=length(countsModel)
+  p=1
+  mu=lambda*offsetModel
+  phiMoM = 1/(n-p) * sum( ((countsModel - mu)^2 - mu)/(mu^2) )
+  return(phiMoM)}
+
+
+
+
+
+getDatasetMoMPositive = function(counts, design, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=2){
+
+        #### estimate lambda and overdispersion based on ZTNB.
+	d <- DGEList(counts)
+	cp <- cpm(d,normalized.lib.sizes=TRUE)
+	dFiltered=d
+	dFiltered <- edgeR::calcNormFactors(dFiltered)
+  dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
+  ## estimate
+  lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction(counts=x, offset=colSums(dFiltered$counts)))
+  dispMoM = vector(length=nrow(dFiltered$counts))
+  for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
+  dispMoM[dispMoM<0] = 1e-5
+
+  for(j in 1:MoMIter){
+  for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
+  for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
+  dispMoM[dispMoM<0] = 1e-5
+  }
+
+
+  ## assume convergence
+  params=cbind(dispMoM,lambdaMoM)
+	rmRows = which(params[,2]>1) #impossibly high lambda
+	rmRows2 = which(params[,2]==0) #zero lambda
+	naRows = which(apply(params,1, function(row) any(is.na(row)))) #not fitted
+	nonZeroDispRows = which(params[,1]<0 | params[,1]==0) #negative dispersion
+	throwRows = c(rmRows,rmRows2,naRows,nonZeroDispRows)
+  if(length(throwRows)>0) params = params[-throwRows,]
+
+	### estimate logistic GAM P(zero) ~ s(aveLogCPM) + logLibSize
+	### use unfiltered data for this model.
+  require(mgcv)
+	propZero = colMeans(counts==0)
+	propZeroGene = rowMeans(counts==0)
+	d <- DGEList(counts)
+	d <- edgeR::calcNormFactors(d)
+	if(cpm=="AveLogCPM"){ avCpm <- aveLogCPM(d)} else if(cpm=="aCpm"){ avCpm <- aCPM(d$counts)} else {stop("cpm must be either AveLogCPM or aCPM")}
+	cpmHist = hist(avCpm, breaks=150, plot=FALSE)
+    	breaks = cpmHist$breaks
+    	mids = cpmHist$mids
+    	midsHlp=rep(mids,ncol(d$counts))
+	logLibSize = log(colSums(counts))
+    	logLibHlp=rep(logLibSize,each=length(mids))
+	binHlp=sapply(breaks[-length(breaks)],function(x) avCpm>x)
+  	binId=apply(binHlp,1,function(x) max(which(x)))
+	nonNullCounts = t(sapply(1:length(mids), function(bin){
+			    binRows <- binId==bin
+			    if(sum(binRows)==0) rep(0,ncol(counts)) else
+			    if(sum(binRows)==1) (counts[which(binRows),]!=0)*1 else
+				colSums(counts[which(binRows),]!=0)
+	    }))
+	nullCounts = t(sapply(1:length(mids), function(bin){
+		    	binRows <- binId==bin
+		    	if(sum(binRows)==0) rep(0,ncol(counts)) else
+		    	if(sum(binRows)==1) (counts[which(binRows),]==0)*1 else
+			    colSums(counts[which(binRows),]==0)
+	    }))
+	expectCounts=cbind(c(nullCounts),c(nonNullCounts))
+	#zeroFit=mgcv::gam(expectCounts~s(midsHlp)+logLibHlp,family=binomial)
+	zeroFit=gam(expectCounts~s(midsHlp,by=logLibHlp),family=binomial)
+
+	### drop extreme dispersions
+  dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
+	if(length(throwRows)>0) dFiltered$AveLogCPM <- dFiltered$AveLogCPM[-throwRows]
+	if(length(throwRows)>0) propZeroGene = propZeroGene[-throwRows]
+	params=data.frame(dispersion=params[,1], lambda=params[,2], aveLogCpm=dFiltered$AveLogCPM, propZeroGene=propZeroGene)
+	dispersion <- params$dispersion
+	AveLogCPM <- params$aveLogCpm
+	lambda <- params$lambda
+	propZeroGene <- params$propZeroGene
+
+	if(is.numeric(drop.extreme.dispersion))
+	{
+		bad <- quantile(dispersion, 1-drop.extreme.dispersion, names = FALSE, na.rm=TRUE)
+		ids <- dispersion <= bad
+		AveLogCPM <- AveLogCPM[ids]
+		dispersion <- dispersion[ids]
+		lambda <- lambda[ids]
+		propZeroGene <- propZeroGene[ids]
+		params <- params[ids,]
+		dFiltered <- dFiltered[ids,]
+	}
+	#lambda=lambda/sum(lambda) #make sure they sum to 1
+	dataset.AveLogCPM <- AveLogCPM
+	dataset.dispersion <- dispersion
+	dataset.lambda <- lambda
+	dataset.propZeroGene <- propZeroGene
+	dataset.lib.size <- d$samples$lib.size
+	dataset.nTags <- nrow(d)
+	list(dataset.AveLogCPM = dataset.AveLogCPM, dataset.dispersion = dataset.dispersion, dataset.lib.size = dataset.lib.size, dataset.nTags = dataset.nTags, dataset.propZeroFit=zeroFit, dataset.lambda=lambda, dataset.propZeroGene=propZeroGene, dataset.breaks = breaks, dataset.cpm=cpm)
+}
+
+####################################
+######### EVALUATE #################
+####################################
+
+#### islam
+paramsIslam = getDatasetMoMPositive(counts=islam, design=model.matrix(~cellType))
+
+source("./NBsimSingleCellUnnormalizedLambda.R")
+nSamples=ncol(islam)
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=nrow(islam) #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(islam),nSamples,replace=TRUE) #library sizes
+islamSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = islam, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsIslam,
+                                lib.size = libSizes)
+
+dds_zingerIslam <- DESeqDataSetFromMatrix(countData = islamSim$counts,
+                                    colData = data.frame(group = grp,
+                                    sample = colnames(islamSim$counts),
+                                    row.names = colnames(islamSim$counts),
+                                    stringsAsFactors = FALSE),
+                                    design = ~ group)
+
+countsimQCReport(ddsList=list(original=dds_origIslam,zingeR=dds_zingerIslam),
+                  outputFile="~/islamMoMPositiveUnnormalizedGoodComparison.html",
+                  description = "islam dataset, unnormalized MoM positive")
+
+### GSE74596
+paramsGSE = getDatasetMoMPositive(counts=countsGSE, design=model.matrix(~group))
+
+source("./NBsimSingleCellUnnormalizedLambda.R")
+nSamples=ncol(countsGSE)-1
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=nrow(countsGSE) #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(countsGSE),nSamples,replace=TRUE) #library sizes
+GSESim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = countsGSE, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsGSE,
+                                lib.size = libSizes)
+
+dds_zingerGSE <- DESeqDataSetFromMatrix(countData = GSESim$counts,
+                      colData = data.frame(group = grp, sample = colnames(GSESim$counts), row.names = colnames(GSESim$counts), stringsAsFactors = FALSE), design = ~ group)
+
+countsimQCReport(ddsList=list(original=dds_origGSE74596,zingeR=dds_zingerGSE),
+                outputFile="~/GSEMoMPositiveUnnormalizedGoodComparison.html",
+                description="GSE dataset, unnormalized Method of Moments on positive counts")
+
+### trapnell
+paramsTrapnell = getDatasetMoMPositive(counts=countsTrapnell, design=model.matrix(~timePoint))
+
+source("./NBsimSingleCellUnnormalizedLambda.R")
+nSamples=ncol(countsTrapnell)-1
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=nrow(countsTrapnell) #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(countsTrapnell),nSamples,replace=TRUE) #library sizes
+trapnellSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = countsTrapnell, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsTrapnell,
+                                lib.size = libSizes)
+
+dds_zingerTrapnell <- DESeqDataSetFromMatrix(countData = trapnellSim$counts, colData = data.frame(group = grp, sample = colnames(trapnellSim$counts), row.names = colnames(trapnellSim$counts), stringsAsFactors = FALSE), design = ~ group)
+
+countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellMoMPositiveUnnormalizedGoodComparison.html", description="trapnell dataset, unnormalized Method of Moments on positive counts")
+
+```
+
+
+```{r}
+## check dispersion estimates
+
+### negative binomial
+lambdas = matrix(rep(seq(1e-6,4e-6,length=181),each=100),ncol=100, byrow=TRUE)
+phi = matrix(rep(seq(0.01,7,length.out=181),each=100),ncol=100, byrow=TRUE)
+libSize = runif(n=100,min=1e6,max=1.5e6)
+hlpCount = matrix(rnbinom(n=181*100, mu=sweep(lambdas,2,STATS=libSize,FUN="*"), size=1/phi),nrow=181,ncol=100,byrow=FALSE)
+
+## lambda
+getExprFraction = function(counts, offset){
+  mean(counts/offset)
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda) ; abline(0,1,col=2)
+
+## dispersion
+getPhiMoM = function(counts, lambda, offset){
+    n=length(counts)
+    mu=lambda*offset
+    phi = (sum(counts^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9)) ; abline(0,1,col=2)
+
+
+
+## estimates on positive counts
+
+## lambda: initially overestimated
+getExprFraction4 = function(counts, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+  sum(countsModel)/sum(offsetModel)
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction4(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda) ; abline(0,1,col=2)
+
+## dispersion: initally underestimated
+getPhiMoM = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9)) ; abline(0,1,col=2)
+
+### iteratively estimate them on positive counts only
+reEstimateExprFraction4 = function(counts, offset, lambda, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+  sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
+}
+
+reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+lambdaLoop=lambda
+dispLoop=disp
+par(mfrow=c(1,2))
+plot(x=lambdas[,1], y=lambdaLoop) ; abline(0,1,col=2)
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
+for(k in 1:15){
+  for(i in 1:nrow(hlpCount)) lambdaLoop[i] = reEstimateExprFraction4(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize, phi=dispLoop[i])
+plot(x=lambdas[,1], y=lambdaLoop) ; abline(0,1,col=2)
+
+  for(i in 1:nrow(hlpCount)) dispLoop[i] = reEstimatePhiMoM4(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize, phi=dispLoop[i])
+dispLoop[dispLoop<0]=1e-5
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
+
+  Sys.sleep(1) #wait a second to see evolution of estimates.
+}
+
+
+
+
+```
+
+
+```{r}
+
+# getPhiMoMPositive = function(counts, lambda, offset){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#     n=length(countsModel)
+#     mu=lambda*offsetModel
+#     phiMoM = mean(1/(n-1) * (sum((countsModel - mu)^2) - mu)/(mu^2))
+#     return(phiMoM)
+# }
+
+
+#
+# reEstimateDispersion = function(counts, offset, phi, lambda){
+#     offsetModel=offset[counts>0]
+#     countsModel = counts[counts>0]
+#     eYt = mean(countsModel)
+#     eY = eYt*(1-dnbinom(x=0,mu=lambda*offsetModel,size=1/phi))
+#     phiMoM = 1/(n-1) * sum( ((countsModel - eY)^2 - eY)/(eY^2) )
+#     return(phiMoM)
+# }
+#
+# reEstimateDispersion2 = function(counts, offset, phi, lambda){
+#     offsetModel=offset[counts>0]
+#     countsModel = counts[counts>0]
+#     nPos = length(countsModel)
+#     #eYSquared = 1/nPos * sum( countsModel^2 * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)) )
+#     eYSquared =  countsModel^2 * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi))
+#     #eY2 = 1/nPos * sum( (countsModel * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)))^2 )
+#     eY2 = (countsModel * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)))^2
+#     #phiMoM = (eYSquared - eY2 - lambda*offsetModel) / (lambda^2*offsetModel^2)
+#     phiMoM = mean( (eYSquared - eY2 - lambda*offsetModel) / (lambda^2*offsetModel^2))
+#     return(phiMoM)
+# }
+
+reEstimateDispersion3 = function(counts, offset, phi, lambda){
+    offsetModel=offset[counts>0]
+    countsModel = counts[counts>0]
+    nPos = length(countsModel)
+    eYSquared = 1/nPos * sum( countsModel^2 * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)) )
+    #eYSquared =  countsModel^2 * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi))
+    eY2 = 1/nPos * sum( (countsModel * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)))^2 )
+    #eY2 = (countsModel * (1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)))^2
+    #phiMoM = (eYSquared - eY2 - lambda*offsetModel) / (lambda^2*offsetModel^2)
+    mu = mean(lambda*offsetModel)
+    phiMoM = mean( (eYSquared - eY2 - mu) / (mu^2))
+    return(phiMoM)
+}
+
+
+reEstimateExprFraction = function(counts, offset, phi, lambda){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  #lambda=countsModel/offsetModel
+  mean(lambda*(1-dnbinom(x=0,mu=lambda*offsetModel,size=1/phi)))
+}
+
+# getExprFraction = function(counts, offset){
+#   offsetModel=offset[counts>0]
+#   countsModel = counts[counts>0]
+#   mean(countsModel/offsetModel)
+# }
+#
+#
+# getPhiMoMPositive = function(counts, lambda, offset){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#     n=length(countsModel)
+#     mu=mean(lambda*offsetModel)
+#     phiMoM = ((1/(n-1)*sum((countsModel-mu)^2)) - mu) / mu^2
+#     return(phiMoM)
+# }
+#
+#
+#
+# means = matrix(rep(20:200,each=100),ncol=100, byrow=TRUE)
+# phi = matrix(rep(seq(0.01,7,length.out=181),each=100),ncol=100, byrow=TRUE)
+# #phi = matrix(rep(1,each=100*181),ncol=100, byrow=TRUE)
+# hlpCount = matrix(rnbinom(n=181*100, mu=means, size=1/phi),nrow=181,ncol=100,byrow=FALSE)
+#
+# hlpGrp=rep(1,100)
+# paramsHlp = getDatasetMoMPositive(counts=hlpCount, design=model.matrix(~0+hlpGrp), MoMIter=0)
+# plot(x=phi[,1],y=paramsHlp$dataset.dispersion, ylim=c(0,9)) ; abline(0,1,col=2)
+# #mean(paramsHlp$dataset.dispersion)
+# #boxplot(paramsHlp$dataset.dispersion, ylim=c(0,25)) ; abline(h=1,col=2)
+
+
+###### more JUNK
+## shows it is somewhat underestimated.
+
+getExprFraction = function(counts, offset){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  mean(countsModel/offsetModel)
+}
+
+getPhiMoMPositive = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    n=length(countsModel)
+    mu=mean(lambda*offsetModel)
+    phiMoM = ((1/(n-1)*sum((countsModel-mu)^2)) - mu) / mu^2
+    return(phiMoM)
+}
+
+#means = matrix(rep(20:200,each=100),ncol=100, byrow=TRUE)
+lambdas = matrix(rep(seq(1e-6,4e-6,length=181),each=100),ncol=100, byrow=TRUE)
+phi = matrix(rep(seq(0.01,7,length.out=181),each=100),ncol=100, byrow=TRUE)
+libSize = runif(n=100,min=1e6,max=1.5e6)
+#phi = matrix(rep(1,each=100*181),ncol=100, byrow=TRUE)
+hlpCount = matrix(rnbinom(n=181*100, mu=sweep(lambdas,2,STATS=libSize,FUN="*"), size=1/phi),nrow=181,ncol=100,byrow=FALSE)
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction(counts=hlpCount[i,], offset=libSize)
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoMPositive(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+
+plot(x=lambdas[,1], y=lambda) ; abline(0,1,col=2)
+plot(x=phi[,1],y=disp, ylim=c(0,9)) ; abline(0,1,col=2)
+
+
+reEstimateExprFraction = function(counts, offset, phi, lambda){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  mean(lambda*(1-dnbinom(x=0,mu=lambda*offsetModel,size=1/phi)))
+}
+
+
+
+reEstimatePhiMoM = function(counts, offset, lambda){
+  countsModel = counts[counts>0]
+  offsetModel=offset[counts>0]
+  n=length(countsModel)
+  p=1
+  mu=lambda*offsetModel
+  phiMoM = 1/(n-p) * sum( ((countsModel - mu)^2 - mu)/(mu^2) )
+  return(phiMoM)
+}
+
+
+reEstimatePhiMoM2 = function(counts, offset, lambda){
+  countsModel = counts[counts>0]
+  offsetModel=offset[counts>0]
+  mu=lambda*offsetModel
+  phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / (sum(mu^2))
+  return(phi)
+}
+
+reEstimateExprFraction3 = function(counts, offset, phi, lambda){
+  offsetModel=offset[counts>0]
+  countsModel = counts[counts>0]
+  mean(countsModel/offsetModel*(1-dnbinom(x=0,mu=lambda*offsetModel,size=1/phi)))
+}
+
+reEstimatePhiMoM3 = function(counts, offset, lambda, phi){
+  countsModel = counts[counts>0]
+  offsetModel=offset[counts>0]
+  nPos = length(countsModel)
+  phi = (sum((1-dnbinom(0, mu=lambda*offsetModel, size=1/phi)) * countsModel^2/offsetModel^2 ) - nPos*lambda^2 - nPos*lambda*sum(1/offsetModel)) / (nPos*lambda^2)
+  return(phi)
+}
+
+
+
+
+## adjust
+lambda2 = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda2[i] = reEstimateExprFraction3(counts=hlpCount[i,], lambda=lambda[i], offset=libSize, phi=disp[i])
+
+plot(x=lambdas[,1], y=lambda2) ; abline(0,1,col=2)
+
+
+disp2 = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp2[i] = reEstimatePhiMoM(counts=hlpCount[i,], lambda=lambda2[i], offset=libSize)
+#for(i in 1:nrow(hlpCount)) disp2[i] = reEstimatePhiMoM3(counts=hlpCount[i,], lambda=lambda2[i], offset=libSize, phi=disp[i])
+plot(x=phi[,1],y=disp2, ylim=c(0,9)) ; abline(0,1,col=2)
+
+## adjust again
+lambda3 = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda3[i] = reEstimateExprFraction3(counts=hlpCount[i,], lambda=lambda2[i], offset=libSize, phi=disp[i])
+plot(x=lambdas[,1], y=lambda3) ; abline(0,1,col=2)
+
+
+disp3 = vector(length=nrow(hlpCount))
+#for(i in 1:nrow(hlpCount)) disp3[i] = reEstimatePhiMoM3(counts=hlpCount[i,], lambda=lambda3[i], offset=colSums(hlpCount), phi=disp2[i])
+for(i in 1:nrow(hlpCount)) disp3[i] = reEstimatePhiMoM(counts=hlpCount[i,], lambda=lambda3[i], offset=libSize)
+plot(x=phi[,1],y=disp3, ylim=c(0,9)) ; abline(0,1,col=2)
+
+lambdaLoop=lambda
+dispLoop=disp
+for(k in 1:10){
+  for(i in 1:nrow(hlpCount)) lambdaLoop[i] = reEstimateExprFraction(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize, phi=dispLoop[i])
+
+  for(i in 1:nrow(hlpCount)) dispLoop[i] = reEstimatePhiMoM(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize)
+dispLoop[dispLoop<0]=1e-5
+
+}
+
+plot(x=lambdas[,1], y=lambdaLoop) ; abline(0,1,col=2)
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
+
+
+
+lambda2 = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda2[i] = reEstimateExprFraction4(counts=hlpCount[i,], offset=libSize, lambda=lambda[i], phi=disp[i])
+
+plot(x=lambdas[,1], y=lambda2) ; abline(0,1,col=2)
+
+
+disp2 = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp2[i] = reEstimatePhiMoM4(counts=hlpCount[i,], lambda=lambda2[i], offset=libSize, phi=disp[i])
+#disp[disp<0] = 1e-5
+
+plot(x=phi[,1],y=disp2, ylim=c(0,9)) ; abline(0,1,col=2)
+
+
+```

@@ -82,8 +82,17 @@ simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islamHlp, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes, cpm="AveLogCPM")
+                                lib.size = libSizes)
 simDataIslam$counts[1:5,1:5]
+## empirical lambda seems to do much better. but the means in general were shown to be unbiased??
+## or use model-based but normalize to 1?
+par(mfrow=c(1,3))
+plot(x=log(libSizes),y=log(colSums(simDataIslam$counts)),xlab="expected", ylab="simulated", main="ZTNB based, lambda normalized") ; abline(0,1,col=2)
+plot(x=log(libSizes),y=log(colSums(simDataIslamEmprical$counts)),xlab="expected", ylab="simulated", main="empirical") ; abline(0,1,col=2)
+plot(x=log(libSizes),y=log(colSums(simDataIslamModelBased$counts)),xlab="expected", ylab="simulated", main= "ZTNB based") ; abline(0,1,col=2)
+
+plot(x=log(rowMeans(sweep(simDataIslam$Lambda,1,FUN="*",STATS=libSizes))), y=log(rowMeans(simDataIslam$counts)), xlab="expected mean", ylab="simulated mean") ; abline(0,1,col=2)
+
 
 # BCV plots
 dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
