@@ -38,7 +38,7 @@ source("../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
 ```
 
 
-```{r}
+```{r cores}
 NCORES <- 2
 registerDoParallel(NCORES)
 register(DoparParam())
@@ -111,7 +111,7 @@ legend("bottomleft", c("real", "simulated"), col=1:2, pch=16)
 # Methods
 ## RNA-seq methods
 ### edgeR
-```{r}
+```{r edgeR}
 edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
   d <- DGEList(counts)
   d <- suppressWarnings(edgeR::calcNormFactors(d))
@@ -127,7 +127,7 @@ edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ### DESeq2
-```{r}
+```{r DESeq2}
 DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   colData <- data.frame(group = group)
   dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
@@ -141,7 +141,7 @@ DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ### limma-voom
-```{r}
+```{r limma}
 limma <- function(counts, group, ylim = NULL, xlim = NULL){
 	design <- model.matrix(~ group)
 	nf <- suppressWarnings(edgeR::calcNormFactors(counts))
@@ -157,43 +157,50 @@ limma <- function(counts, group, ylim = NULL, xlim = NULL){
 
 ## scRNA-seq methods
 ### MAST
-```{r}
+```{r MAST}
 ### copied code from FPR_mocks.Rmd on September 14, 2017.
-MAST <- function(e){
+MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   require(MAST)
-  counts <- exprs(e)
   tpm <- counts*1e6/colSums(counts)
   tpm <- log2(tpm+1)
-  sca <- FromMatrix(tpm,
-                    cData=data.frame(group=pData(e)$condition,
-                                     pickingSession=pData(e)$pickingSession))
+  sca <- FromMatrix(tpm,  cData=data.frame(group=group))
+  #sca <- FromMatrix(counts,  cData=data.frame(group=group))
 
   # Adaptive thresholding from MAST vignette
   freq_expressed <- 0.2
-  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
-                                     conditions = pData(e)$condition)
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50, conditions = group)
   #par(mfrow=c(5,4))
   #plot(thres)
   assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
   expressed_genes <- freq(sca) > freq_expressed
   sca <- sca[expressed_genes,]
 
-  ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
+  ngeneson <- apply(counts,2,function(x) mean(x>0))
   CD <- colData(sca)
   CD$ngeneson <- ngeneson
   CD$cngeneson <- CD$ngeneson-mean(ngeneson)
   colData(sca) <- CD
   ## differential expression
-  fit <- zlm(~ cngeneson + group + pickingSession, sca = sca,
-             method = "bayesglm", ebayes = TRUE)
-  L <- matrix(0, nrow = ncol(coef(fit, "D")))
-  rownames(L) <- colnames(coef(fit, "D"))
-  L["groupB",] <- 1
-  lrFit <- lrTest(fit, hypothesis = L)
+  fit <- zlm(~ cngeneson + group , sca = sca)
+  lrFit <- lrTest(fit, 'group')
   pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
   padj <- p.adjust(pval, method = "BH")
-  list(pvals = pval, padj = padj, logfc = NA)
+
+  ### MAST filtered the genes, so make a list that is consistent with the original count matrix.
+  pvalAll = vector(length=nrow(counts))
+  pvalAll[] = 1
+  names(pvalAll)=rownames(counts)
+  pvalAll[match(names(pval),names(pvalAll))] = pval
+
+  padjAll = vector(length=nrow(counts))
+  padjAll[] = 1
+  names(padjAll)=rownames(counts)
+  padjAll[match(names(padj),names(padjAll))] = padj
+
+  list(pval = pvalAll, padj = padjAll, logfc = NA)
 }
+
+
 ```
 
 ## zingeR
@@ -201,7 +208,7 @@ MAST <- function(e){
 Counts are modelled as ZINB. Weights are posterior probabilities that a count belongs to the count component given that the count and library size is observed. Parameters are estimated using EM algorithm. See http://www.biorxiv.org/content/early/2017/06/30/157982 for more details.
 
 ### zingeR-edgeR
-```{r}
+```{r zingeR-edgeR}
 zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
   require(zingeR)
   d <- DGEList(counts)
@@ -219,7 +226,7 @@ zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ### zingeR-DESeq2
-```{r}
+```{r zingeR-deseq2}
 zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   require(zingeR)
   colData <- data.frame(group = group)
@@ -240,7 +247,7 @@ zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ### zingeR-limma-voom-filtered
-```{r}
+```{r zinger-limmavoom}
 zingeR_limma <- function(counts, group, ylim = NULL, xlim = NULL){
   require(zingeR)
   design <- model.matrix(~group)
@@ -280,7 +287,7 @@ computeZinbwaveWeights <- function(zinb, counts){
 ```
 
 ### zinbwave-edgeR
-```{r}
+```{r zinbwaveedger}
 zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main = 'ZINB-WaVE'){
   d=DGEList(counts)
   d=suppressWarnings(calcNormFactors(d))
@@ -296,7 +303,7 @@ zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main =
 ```
 
 ### zinbwave-DESeq2
-```{r}
+```{r zinbwavedeseq2}
 zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
@@ -312,7 +319,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 ```
 
 ### zinbwave-limma-voom
-```{r}
+```{r zinbwavevoom}
 zinbwave_limma <- function(counts, group, zinb){
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
@@ -340,14 +347,14 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
-save(zinb_c, file = 'zinb-common-disp-fc2.rda')
+#zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+#save(zinb_c, file = 'zinb-common-disp-fc2.rda')
 load('zinb-common-disp-fc2.rda')
 ```
 
 ```{r zinbgenewisedisp}
-zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
-save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
+#zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
+#save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
 load('zinb-genewise-disp-fc2.rda')
 ```
 
@@ -377,7 +384,7 @@ res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
 ```
 
-```{r}
+```{r res}
 res = lapply(res, as.data.frame)
 for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 ```
@@ -428,8 +435,8 @@ abline(a=0,b=1)
 listRates = lapply(res, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
   TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
-  FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
-  c(nDE = nDE, TPR = TPR, FPR = FPR)
+  FDR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
+  c(nDE = nDE, TPR = TPR, FDR = FDR)
 })
 
 df = do.call(rbind, listRates)
@@ -437,9 +444,9 @@ df = as.data.frame(df)
 df$Method = names(res)
 df$nDE = as.integer(df$nDE)
 df$TPR = round(df$TPR*100, 1)
-df$FPR = round(df$FPR*100, 1)
-df = df[,c('Method', 'nDE', 'TPR', 'FPR')]
-colnames(df) = c('Method', 'nDE', 'TPR(%)', 'FPR(%)')
+df$FDR = round(df$FDR*100, 1)
+df = df[,c('Method', 'nDE', 'TPR', 'FDR')]
+colnames(df) = c('Method', 'nDE', 'TPR(%)', 'FDR(%)')
 rownames(df) = NULL
 kable(df)
 ```
@@ -508,7 +515,10 @@ p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1
                      name = 'Method')
 legend <- get_legend(p2)
 
+#pdf("../../draftOverleaf/10963157vrrwqjqjdrnf/performanceIslamfc2.pdf")
 plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
+#dev.off()
+
 ```
 
 ## Distribution of pvalues
