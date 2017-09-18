@@ -273,9 +273,9 @@ countsimQCReport(ddsList=list(original=dds_origIslam,zingeR=dds_zingerIslam),
                   description = "islam dataset, unnormalized MoM positive")
 
 ### GSE74596
-paramsGSE = getDatasetMoMPositive(counts=countsGSE, design=model.matrix(~group))
+paramsGSE = getDatasetMoMPositive(counts=countsGSE)
 
-source("./NBsimSingleCellUnnormalizedLambda.R")
+#source("./NBsimSingleCellUnnormalizedLambda.R")
 nSamples=ncol(countsGSE)-1
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=nrow(countsGSE) #nr of features
@@ -292,9 +292,14 @@ GSESim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
 dds_zingerGSE <- DESeqDataSetFromMatrix(countData = GSESim$counts,
                       colData = data.frame(group = grp, sample = colnames(GSESim$counts), row.names = colnames(GSESim$counts), stringsAsFactors = FALSE), design = ~ group)
 
+# countsimQCReport(ddsList=list(original=dds_origGSE74596,zingeR=dds_zingerGSE),
+#                 outputFile="~/GSEMoMPositiveUnnormalizedGoodComparisonImrpovedEstimator.html",
+#                 description="GSE dataset, unnormalized Method of Moments on positive counts")
+
 countsimQCReport(ddsList=list(original=dds_origGSE74596,zingeR=dds_zingerGSE),
-                outputFile="~/GSEMoMPositiveUnnormalizedGoodComparisonImrpovedEstimator.html",
-                description="GSE dataset, unnormalized Method of Moments on positive counts")
+                outputFile="~/GSEMoMNewDefaultSim.html",
+                description="GSE dataset, unnormalized Method of Moments on positive counts, new defaults in simulation",
+              calculateStatictics=FALSE)
 
 ### trapnell
 paramsTrapnell = getDatasetMoMPositive(counts=countsTrapnell, design=model.matrix(~timePoint))
@@ -407,6 +412,37 @@ disp = vector(length=nrow(hlpCount))
 for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
 disp[disp<0] = 1e-5
 plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+
+### better initial estimates by using empirical zero probability
+getExprFraction4 = function(counts, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    lambda = sum(countsModel)/sum(offsetModel)
+    lambda*(1-mean(counts==0))
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction4(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
+
+getPhiMoM = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2 * (1-mean(counts==0))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+## these are immediately correct. very nice.
+
+
+
 
 ### iteratively estimate them on positive counts only
 reEstimateExprFraction4 = function(counts, offset, lambda, phi){

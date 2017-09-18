@@ -132,6 +132,8 @@ tenXData = counts
 
 ```{r}
 paramsTenx = getDatasetMoMPositive(counts = tenXData)
+
+### PROBLEM: many dispersions are estimated to be negative.
 ```
 
 
@@ -141,7 +143,9 @@ paramsTenx = getDatasetMoMPositive(counts = tenXData)
 Fit between simulated and real dataset is not great, but Koen is working on new simulation framework.
 
 ```{r sims}
-nSamples=80
+source("zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
+
+nSamples=ncol(tenXData)
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=10000 #nr of features
 set.seed(11)
@@ -151,36 +155,37 @@ libSizes=sample(colSums(tenXData),nSamples,replace=TRUE) #library sizes
 simData <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                            dataset = tenXData, nTags = nTags,
                            group = grp,
-                           verbose = TRUE, params = params,
+                           verbose = TRUE, params = paramsTenx,
                            lib.size = libSizes, cpm="AveLogCPM")
 simData$counts[1:5,1:5]
 ```
 
 ```{r}
 # BCV plots
-dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(counts)))
-dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~cellType), interval=c(0,10)),prior.df=0)
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(tenXData)))
+dOrig = estimateDisp(dOrig, design=model.matrix(~cellType))
 
 d=suppressWarnings(edgeR::calcNormFactors(DGEList(simData$counts)))
-d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
+d=estimateDisp(d, design=model.matrix(~grp))
 ```
 
 ```{r}
 par(mfrow=c(1,2))
-plotBCV(dOrig,ylim=c(0,20), xlim=c(0,20))
-plotBCV(d,ylim=c(0,20), xlim=c(0,20))
+plotBCV(dOrig,ylim=c(0,12), xlim=c(9,16))
+plotBCV(d,ylim=c(0,12), xlim=c(9,16))
 par(mfrow=c(1,1))
+
 ```
 
 ```{r}
 # association of library size with zeros
-plot(x=log(colSums(counts)), y=colMeans(counts==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,20))
+plot(x=log(colSums(tenXData)), y=colMeans(tenXData==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,20))
 points(x=log(colSums(simData$counts)), y=colMeans(simData$counts==0), col=2)
 ```
 
 ```{r}
 # association of aveLogCPM with zeros
-plot(x=edgeR::aveLogCPM(counts), y=rowMeans(counts==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
+plot(x=edgeR::aveLogCPM(tenXData), y=rowMeans(tenXData==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
 points(x=edgeR::aveLogCPM(simData$counts),
        y=rowMeans(simData$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
 ```
@@ -235,19 +240,64 @@ limma <- function(counts, group, ylim = NULL, xlim = NULL){
 ## scRNA-seq methods
 ### MAST
 ```{r}
+### copied code from FPR_mocks.Rmd on September 14, 2017.
 MAST <- function(counts, group, ylim = NULL, xlim = NULL){
-  tpm <- counts * 1e6 / colSums(counts)
-  sca <- FromMatrix(tpm, cData = data.frame(group = group))
-  ngeneson <- apply(exprs(sca), 1, function(x) mean(x > 0))
-  CD <- cData(sca)
+  require(MAST)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,  cData=data.frame(group=group))
+  #sca <- FromMatrix(counts,  cData=data.frame(group=group))
+
+  # Adaptive thresholding from MAST vignette
+  freq_expressed <- 0.2
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50, conditions = group)
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  expressed_genes <- freq(sca) > freq_expressed
+  sca <- sca[expressed_genes,]
+
+  ngeneson <- apply(counts,2,function(x) mean(x>0))
+  CD <- colData(sca)
   CD$ngeneson <- ngeneson
-  CD$cngeneson <- CD$ngeneson - mean(ngeneson)
-  cData(sca) <- CD
-  fit <- zlm(~ group + ngeneson, sca = sca)
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group , sca = sca)
   lrFit <- lrTest(fit, 'group')
   pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
   padj <- p.adjust(pval, method = "BH")
-  cbind(pval = pval, padj = padj)
+
+  ### MAST filtered the genes, so make a list that is consistent with the original count matrix.
+  pvalAll = vector(length=nrow(counts))
+  pvalAll[] = 1
+  names(pvalAll)=rownames(counts)
+  pvalAll[match(names(pval),names(pvalAll))] = pval
+
+  padjAll = vector(length=nrow(counts))
+  padjAll[] = 1
+  names(padjAll)=rownames(counts)
+  padjAll[match(names(padj),names(padjAll))] = padj
+
+  list(pval = pvalAll, padj = padjAll, logfc = NA)
+}
+
+```
+
+## zingeR-edgeR
+```{r}
+zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(zingeR)
+  d <- DGEList(counts)
+  d <- suppressWarnings(edgeR::calcNormFactors(d))
+  design <- model.matrix(~ group)
+  weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 100, normalization = "TMM", verbose = TRUE, plotW=TRUE)
+  d$weights <- weights
+  d <- estimateDisp(d, design)
+  plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
+  fit <- glmFit(d,design)
+  lrt <- zingeR::glmWeightedF(fit, coef = 2, independentFiltering = TRUE)
+  cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
 }
 ```
 
@@ -280,11 +330,12 @@ zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main =
   d=suppressWarnings(calcNormFactors(d))
   design=model.matrix(~group)
   weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights[weights==0] = 1e-15 #errors with zero weights
   d$weights <- weights
   d=estimateDisp(d, design)
   plotBCV(d, ylim = ylim, main = main)
   fit=glmFit(d,design)
-  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  lrt=zingeR::glmWeightedF(fit,coef=2, independentFiltering = TRUE)
   cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
 }
 ```
@@ -348,7 +399,7 @@ load('zinb-genewise-disp-fc2.rda')
 # Compare dispersion estimates
 ```{r tenxDispFC2, warning=FALSE}
 counts = simData$counts
-myfct = list(DESeq2 = DESeq2,
+myfct = list(#DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma,
              MAST = MAST)
@@ -366,10 +417,13 @@ res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
+
+res[['zingeR-edgeR']] = zingeR_edgeR(counts, grp)
 ```
 
 ```{r}
 res = lapply(res, as.data.frame)
+for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 ```
 
 ## Compare weights estimates
@@ -458,7 +512,7 @@ greens = rev(brewer.pal(11, "PiYG"))[1:3]
 mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
           blues[3], greens[3], reds[3], 'black')
 names(mycol) = c(names(res10), 'truth')
-names(cobraperf@overlap) = names(mycol)
+#names(cobraperf@overlap) = names(mycol)
 colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
                                    facetted = FALSE)
@@ -481,6 +535,7 @@ p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .
 legend <- get_legend(p2)
 
 plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
+
 ```
 
 ## Distribution of pvalues
