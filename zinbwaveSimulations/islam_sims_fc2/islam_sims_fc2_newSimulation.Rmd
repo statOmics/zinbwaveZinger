@@ -77,6 +77,9 @@ set.seed(11)
 DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
 fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
 libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
+
+source("../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
+
 simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islamHlp, nTags = nTags,
                                 group = grp,
