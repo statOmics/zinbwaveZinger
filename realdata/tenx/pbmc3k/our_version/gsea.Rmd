@@ -1,0 +1,68 @@
+```{r}
+library(SingleCellExperiment)
+library(limma)
+library(xCell)
+library(GSEABase)
+library(clusterExperiment)
+
+load('core.rda')
+core
+clus = as.integer(colData(core)$clus)
+
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7)
+new.cluster.ids <- c("CD4 T cells", "CD14+ Monocytes", "B cells",
+                     "CD8 T cells", "FCGR3A+ Monocytes", "NK cells",
+                     "Dendritic cells", "Megakaryocytes")
+newClust <- plyr::mapvalues(x = colData(core)$clus,
+                              from = current.cluster.ids,
+                              to = new.cluster.ids)
+
+
+## extract genesets from xcell
+genesets <- unlist(geneIds(xCell.data$signatures))
+celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
+names(genesets) <- NULL
+gs <- tapply(genesets, celltypes, c)
+#gs_idx <- ids2indices(gs, rownames(core), remove.empty=TRUE)
+#min_gene_in_module <- 5
+#gs_idx <- gs_idx[sapply(gs_idx, length) >= min_gene_in_module]
+
+library(fgsea)
+load('de.rda')
+subde = de[de$contrast == 'c1' & de$method == 'edgeR', ]
+degenes = subde$pval
+names(degenes) = subde$gene
+gsea = fgsea(gs, degenes, nperm = 1000, minSize = 5)
+gsea = gsea[order(gsea$pval), ]
+gsea
+```
+
+```{r}
+## create design matrix
+norm10x = function (ei)
+{
+  sums = colSums(ei)
+  eo = t(t(ei)*median(sums)/sums)
+  return(eo)
+}
+tc <- norm10x(assay(core))
+ce <- clusterExperiment(se = tc, clusters= clus,
+                        transformation = log1p)
+```
+
+```{r}
+nclus = length(unique(clus))
+design <- model.matrix(~ 0 + factor(clus))
+#contrast = matrix(-1/7, nrow = nclus, ncol = nclus)
+#diag(contrast) = 1
+romerOut = romer(transform(ce), gs_idx, design, 1)
+topRomer(romerOut, alt="up")
+topRomer(romerOut, alt="down")
+```
+
+```{r}
+pal <- clusterExperiment::bigPalette
+colcl <- pal[1:8]
+names(colcl) <- levels(factor(clus))
+clusterLegend(ce)[[1]][,"color"] <- colcl[clusterLegend(ce)[[1]][,"name"]]
+```

@@ -1,0 +1,44 @@
+---
+title: "Look at the DE genes with the different methods"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(seurat)
+```
+
+We applied different methods to find a set of DE genes: edgeR, DESeq2, zinbwave-edgeR, zinbwave-DESeq2, MAST, limmavoom, Seurat. We now want to look at the DE genes to make sure we indeed identify DE genes between memory CD4+ T cells and naive CD4+ T cells.
+
+```{r}
+load('pbmc3k_subCD4.rda')
+```
+
+```{r}
+VlnPlot(object = pbmc, features.plot = c("MS4A1", "CD79A"))
+```
+
+```{r}
+VlnPlot(object = pbmc, features.plot = c("NKG7", "PF4"), use.raw = TRUE, y.log = TRUE)
+```
+
+```{r}
+FeaturePlot(object = pbmc, features.plot = c("MS4A1", "GNLY", "CD3E", "CD14", 
+    "FCER1A", "FCGR3A", "LYZ", "PPBP", "CD8A"), cols.use = c("grey", "blue"), 
+    reduction.use = "tsne")
+```
+
+```{r}
+top10 <- pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_diff)
+# setting slim.col.label to TRUE will print just the cluster IDS instead of
+# every cell name
+DoHeatmap(object = pbmc, genes.use = top10$gene, slim.col.label = TRUE, remove.key = TRUE)
+```
