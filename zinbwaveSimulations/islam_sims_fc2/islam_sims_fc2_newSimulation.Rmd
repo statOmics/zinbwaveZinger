@@ -100,8 +100,8 @@ plotBCV(d,ylim=c(0,13), xlim=c(2,16), main="simulated dataset")
 par(mfrow=c(1,1))
 
 # association of library size with zeros
-plot(x=log(colSums(islamHlp)), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", xlim=c(5.5,15), ylim=c(0.2,1))
-points(x=log(colSums(simDataIslam$counts)), y=colMeans(simDataIslam$counts==0), col=2)
+plot(x=colSums(islamHlp), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", ylim=c(0.2,1))
+points(x=colSums(simDataIslam$counts), y=colMeans(simDataIslam$counts==0), col=2)
 legend("bottomleft", c("real", "simulated"), col=1:2, pch=1)
 
 # association of aveLogCPM with zeros

@@ -470,8 +470,7 @@ NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group)
     expectedZeroProbablityNegBinomial = rowMeans(zeroProbNegBin)
 
     ## calculate dropouts
-    dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat) #allow a 5% margin.
-    #dropoutGenes = max(0,expectedZeroProbablityNegBinomial-0.05) < rowMeans(zeroProbMat) #allow a 5% margin.
+    dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat) 
     message(paste0("Adding extra zeros w.r.t. NB for ",sum(dropoutGenes)," genes"))
     #dropout matrix is 0 for dropout.
     dropoutMatrix = 1-matrix(rbinom(n=nTags*nlibs, size=1, prob=zeroProbMat), nrow=nTags, ncol=nlibs, byrow=FALSE)
