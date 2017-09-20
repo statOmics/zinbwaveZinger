@@ -1,0 +1,382 @@
+---
+title: "Case study on neuronal cells - FPR on mocks"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(DESeq2)
+library(edgeR)
+library(limma)
+library(zingeR)
+library(zinbwave)
+
+library(genefilter)
+
+library(BiocParallel)
+library(doParallel)
+library(Biobase)
+library(ggplot2)
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to compare the FPR between zinbwave-DE, zingeR-DE, and other DE methods on mock communities. I'll first try to reproduce Figure 5 from zingeR preprint, but with 10x-genomics data 3k PMBCs.
+
+# Functions
+
+Code for rna-seq and zinger rna-seq functions are adapted from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
+
+```{r sourceEdgeR}
+runEdgeR <- function(e) {
+  library(edgeR)
+  condition = pData(e)$condition
+  design <- model.matrix(~ condition)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  dgel=estimateDisp(dgel,design)
+  edger.fit <- glmFit(dgel, design)
+  edger.lrt <- glmLRT(edger.fit, coef="conditionB")
+  pvals <- edger.lrt$table$PValue
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  logfc <- edger.lrt$table$logFC
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+
+```
+
+```{r deseq2}
+runDESeq2_poscounts <- function(e) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e),
+                                colData=DataFrame(pData(e)),
+                                design=~ condition)
+  dds <- estimateSizeFactors(dds,type="poscounts")
+  dds <- estimateDispersions(dds)
+  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
+  res <- results(dds, name="condition_B_vs_A")
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  logfc <- res$log2FoldChange
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+```
+
+```{r sourceEdgeRzingeR}
+# code from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
+runEdgeREMLibSize=function(e){
+  library(edgeR)
+  library(genefilter)
+  condition = pData(e)$condition
+  design <- model.matrix(~ condition)
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  #not adding a design matrix models the zeroes with the library size automatically
+  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
+  designZI = model.matrix(~ effLogLibSize)
+  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
+  d$weights = zeroWeights
+  d=estimateDisp(d,design)
+  fit <- glmFit(d, design)
+  lrt = glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
+}
+```
+
+```{r zingerdeseq2}
+pvalueAdjustment_kvdb <- function(baseMean, filter, pValue,
+                             theta, alpha=0.05, pAdjustMethod="BH") {
+  # perform independent filtering
+    if (missing(filter)) {
+      filter <- baseMean
+    }
+    if (missing(theta)) {
+      lowerQuantile <- mean(filter == 0)
+      if (lowerQuantile < .95) upperQuantile <- .95 else upperQuantile <- 1
+      theta <- seq(lowerQuantile, upperQuantile, length=50)
+    }
+
+    # do filtering using genefilter
+    stopifnot(length(theta) > 1)
+    filtPadj <- filtered_p(filter=filter, test=pValue,
+                           theta=theta, method=pAdjustMethod)
+    numRej  <- colSums(filtPadj < alpha, na.rm = TRUE)
+    # prevent over-aggressive filtering when all genes are null,
+    # by requiring the max number of rejections is above a fitted curve.
+    # If the max number of rejection is not greater than 10, then don't
+    # perform independent filtering at all.
+    lo.fit <- lowess(numRej ~ theta, f=1/5)
+    if (max(numRej) <= 10) {
+      j <- 1
+    } else {
+      residual <- if (all(numRej==0)) {
+        0
+      } else {
+        numRej[numRej > 0] - lo.fit$y[numRej > 0]
+      }
+      thresh <- max(lo.fit$y) - sqrt(mean(residual^2))
+      j <- if (any(numRej > thresh)) {
+        which(numRej > thresh)[1]
+      } else {
+        1
+      }
+    }
+    padj <- filtPadj[, j, drop=TRUE]
+    cutoffs <- quantile(filter, theta)
+    filterThreshold <- cutoffs[j]
+    filterNumRej <- data.frame(theta=theta, numRej=numRej)
+    filterTheta <- theta[j]
+
+    return(list(padj=padj, filterThreshold=filterThreshold, filterTheta=filterTheta, filterNumRej = filterNumRej, lo.fit=lo.fit, alpha=alpha))
+
+}
+
+
+runDESeq2Zero <- function(e){
+  library(DESeq2) ; library(genefilter)
+  condition = pData(e)$condition
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
+  designZI=model.matrix(~effLogLibSize)
+  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE,
+                              design=model.matrix(~condition),
+                              colData=colData(dse), normalization="DESeq2_pos",
+                              designZI=designZI)
+  assays(dse)[["weights"]] = zeroWeights
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE, modelMatrixType="standard")
+  res <- results(dse, name="condition_B_vs_A")
+  baseMean=unname(rowMeans(sweep(counts(dse),2,1/sizeFactors(dse),FUN="*")))
+  pvalDesZero = 2*(1-pt(abs(res$stat),df=rowSums(zeroWeights)-2))
+  padjusted = pvalueAdjustment_kvdb(pValue=pvalDesZero,filter=baseMean,alpha=0.05)
+  list(pvals=pvalDesZero,padj=padjusted$padj,logfc=res$log2FoldChange)
+}
+```
+
+```{r zinbwaveEdgeR}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+
+runZinbwaveEdgeR <- function(e){
+  condition = pData(e)$condition
+  design <- model.matrix(~ condition)
+  # compute zinbwave weights
+  library(zinbwave)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  # use zingeR-edgeR
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- weights
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  pvals = lrt$table$PValue
+  list(pvals = pvals, padj = lrt$table$padjFilter, logfc = lrt$table$logFC)
+}
+```
+
+```{r zinbwavedeseq2}
+runZinbwaveDESeq2 <- function(e){
+  condition = pData(e)$condition
+  design <- model.matrix(~ condition)
+  # compute zinbwave weights
+  library(zinbwave)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  # use zingeR-DESeq2
+  dse <- DESeqDataSetFromMatrix(exprs(e),
+                                colData=DataFrame(pData(e)),
+                                design=~ condition)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dimnames(weights) = NULL
+  assays(dse)[["weights"]] = weights
+  dse <- estimateDispersions(dse)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  resultsNames(dse)
+  res = results(dse, name="conditionB")
+  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
+}
+```
+
+```{r}
+runMAST <- function(e){
+  require(MAST)
+  counts <- exprs(e)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,cData=data.frame(group=pData(e)$condition))
+  
+  # Adaptive thresholding from MAST vignette
+  freq_expressed <- 0.2
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300,
+                                     conditions = pData(e)$condition)
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  expressed_genes <- freq(sca) > freq_expressed
+  sca <- sca[expressed_genes,]
+
+  ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
+  CD <- colData(sca)
+  CD$ngeneson <- ngeneson
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group, sca = sca,
+             method = "bayesglm", ebayes = TRUE)
+  L <- matrix(0, nrow = ncol(coef(fit, "D")))
+  rownames(L) <- colnames(coef(fit, "D"))
+  L["groupB",] <- 1
+  lrFit <- lrTest(fit, hypothesis = L)
+  pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
+  padj <- p.adjust(pval, method = "BH")
+  list(pvals = pval, padj = padj, logfc = NA)
+}
+```
+
+```{r limmavoom}
+runVoom <- function(e) {
+  library(limma)
+  condition = pData(e)$condition
+  design <- model.matrix(~ condition)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  v <- voom(dgel,design,plot=FALSE)
+  fit <- lmFit(v,design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef="conditionB",n=nrow(dgel),sort.by="none")
+  pvals <- tt$P.Value
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=tt$logFC)
+}
+```
+
+# Data
+```{r data}
+load('../tenx/pbmc3k/our_version/core.rda')
+core
+ncells = 50
+nreps = 10
+
+subsets = sapply(1:nreps, function(i){
+  set.seed(i)
+  c1 = sample(ncol(core), ncells, replace = FALSE)
+  remaining = seq_len(ncol(core))
+  remaining = remaining[!remaining %in% c1]
+  c2 = sample(remaining, ncells, replace = FALSE)
+  stopifnot(sum(c1 %in% c2) == 0 )
+  stopifnot(sum(c2 %in% c1) == 0 )
+  c(c1, c2)
+})
+subsets = as.data.frame(t(subsets))
+```
+
+# Results
+
+We remove genes with only zeros. It seems that edgeR and zingeR-edgeR don't need to remove these genes. What are the pvalues for these genes?
+
+```{r res}
+algos <- list("DESeq2_poscounts"= runDESeq2_poscounts,
+              "zingeR-DESeq2"   = runDESeq2Zero,
+              "zinbwave-DESeq2" = runZinbwaveDESeq2,
+              "edgeR"           = runEdgeR,
+              "zingeR-edgeR"    = runEdgeREMLibSize,
+              "zinbwave-edgeR"  = runZinbwaveEdgeR,
+              "limma-voom"      = runVoom,
+              "MAST"            = runMAST)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+```
+
+```{r,eval=FALSE}
+eset = as(core, 'ExpressionSet')
+res <- lapply(1:nreps, function(i) {
+    cat(i," ")
+    eLoop <- eset[,as.numeric(subsets[i,])]
+    ngenes = sum(rowSums(exprs(eLoop) > 0) < 5)
+    cat(sprintf("Removing %s genes with only 0's", ngenes))
+    eLoop <- eLoop[rowSums(exprs(eLoop) > 0) > 4, ]
+    condition = factor(rep(c("A", "B"), each = 50))
+    pData(eLoop)$condition = condition
+    resFPR <- lapply(namesAlgos, function(n){
+      print(n)
+      algos[[n]](eLoop)
+    })
+    save(resFPR, file = sprintf('FPR_.%srda', i))
+    rm(resFPR)
+    i
+})
+```
+
+```{r}
+res <- lapply(1:nreps, function(i) {
+  load(sprintf('FPR_.%srda', i))
+  resFPR
+})
+```
+
+## Boxplots
+```{r mocksBoxplot}
+hlp=lapply(res,function(replication){
+  lapply(replication,function(method){
+    pval=method$pvals
+    pval[is.na(pval)]=1 #independent filtering
+    mean(pval<=0.05)
+  })
+})
+
+fprHat=Reduce(hlp,f=cbind)
+fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
+rownames(fprHat)=namesAlgos
+
+boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
+ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
+    geom_point(position = position_jitter(w = 0.1, h = 0),
+               color="grey50", size=1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
+  scale_colour_discrete(guide="none") + ylab("False Positive Rate") +
+  geom_hline(aes(yintercept=0.05,colour="red"))
+```
+
+## Histograms of pvalues
+```{r mocksPvalues}
+k=1
+par(mfrow=c(3,3))
+hh <- sapply(1:length(res[[k]]), function(i){
+  hist(res[[k]][[i]]$pvals, main=names(algos)[i], xlab="",
+       breaks=seq(0,1,by=0.05)) 
+})
+par(mfrow=c(1,1))
+```
+
+
+

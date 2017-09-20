@@ -1,0 +1,224 @@
+---
+title: "Dimensionality reduction using zinbwave - tenX dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+#library(zinbwave)
+#library(matrixStats) #for fct rowVars
+#library(clusterExperiment) # pal = colors of the clusters
+#library(scater) # calculateQC
+#library(rARPACK) # fastpca
+#library(dplyr)
+set.seed(8283)
+```
+
+
+The goal of this document is to cluster the cells using the W from zinbwave.
+
+# Load data 
+
+Load the data created by running create-se-object.Rmd
+
+```{r data}
+load('../data/tenX_pbmc4k.rda')
+se
+clus = colData(se)$graphclust
+```
+
+# Seurat on W
+
+Use Davide's code to try clustering using Seurat. We need to change the code in Seurat so that W matrix from zinbwave is used instead of the pca.
+
+```{r seurat_zinb2}
+library(Seurat)
+library(FNN)
+library(dplyr)
+library(Matrix)
+
+# create seurat object
+pbmc.data <- Read10X("../step1-create-se-object/outs/filtered_gene_bc_matrices/GRCh38/")
+pbmc <- CreateSeuratObject(pbmc.data, project = "10X_PBMC",
+                           min.cells = 1, min.genes = 1,
+                           normalization.method = NULL,
+                           do.scale=FALSE, do.center = FALSE)
+
+## Build SNN
+k.param = 10
+k.scale = 10
+load('../step2-run-zinbwave/tenx_pbmc4k_zinb_k10.rda')
+n.cells = nSamples(zinb_res)
+data.use <- getW(zinb_res)
+library(FNN)
+my.knn <- FNN::get.knn(as.matrix(data.use),
+                       k = min(k.scale * k.param, n.cells - 1))
+nn.ranked <- cbind(1:n.cells, my.knn$nn.index[, 1:(k.param-1)])
+nn.large <- my.knn$nn.index
+w <- Seurat:::CalcSNNSparse(colnames(pbmc.data), k.param,
+                            nn.large, nn.ranked, 
+                            prune.SNN = 1/15, 
+                            print.output = FALSE)
+
+## Run modularity clustering
+SNN.use <- w
+resolution <- 0.2
+pbmc <- Seurat:::RunModularityClustering(pbmc, SNN.use, modularity = 1, r = resolution, algorithm = 1, n.start = 100, n.iter = 10, random.seed = 0, print.output = FALSE, temp.file.location = NULL)
+pbmc <- Seurat:::GroupSingletons(pbmc, SNN.use)
+name <- paste("res.", resolution, sep = "")
+pbmc <- StashIdent(pbmc, name)
+```
+
+```{r}
+seurat_clus <- pbmc@ident
+names(seurat_clus) <- paste0(names(pbmc@ident), "-1")
+table(seurat_clus, clus)
+
+library(Rtsne)
+zinb_tsne <- Rtsne(data.use, pca = FALSE)
+par(mfrow=c(1,2))
+plot(zinb_tsne$Y, pch=19, col=clus, main = '10x labels')
+plot(zinb_tsne$Y, pch=19, col=as.integer(seurat_clus),
+     main = 'seurat labels')
+par(mfrow=c(1,1))
+```
+
+Clusters seem reasonable but are quite different from 10x genomics labels. 
+
+Re-save se object with cluster labels from Seurat on W
+```{r}
+colData(se)$seurat_clus = as.integer(seurat_clus)
+save(se, file = '../data/tenX_pbmc4k.rda')
+```
+
+
+# Seurat on PCA
+
+```{r pca}
+pbmc.data <- Read10X("../step1-create-se-object/outs/filtered_gene_bc_matrices/GRCh38/")
+pbmc <- CreateSeuratObject(pbmc.data, min.cells = 3, min.genes = 200, normalization.method = 'LogNormalize', project = "10X_PBMC")
+mito.genes <- grep("^MT-", rownames(pbmc@data), value = T)
+percent.mito <- colSums(expm1(as.matrix(pbmc@data)[mito.genes, ]))/colSums(expm1(as.matrix(pbmc@data)))
+pbmc <- AddMetaData(pbmc, percent.mito, "percent.mito")
+VlnPlot(pbmc, c("nGene", "nUMI", "percent.mito"), nCol = 3)
+
+GenePlot(pbmc, "nUMI", "percent.mito")
+GenePlot(pbmc, "nUMI", "nGene")
+
+# filter out cells that have unique gene counts over 2,500 (why?)
+pbmc <- SubsetData(pbmc, subset.name = "nGene", accept.high = 2500)
+pbmc <- SubsetData(pbmc, subset.name = "percent.mito", accept.high = 0.05)
+
+#regress out unwanted sources of variation... (extensive normalization)
+pbmc <- ScaleData(pbmc, vars.to.regress = c("nUMI", "percent.mito"))
+
+#identify high variable genes
+pbmc <- FindVariableGenes(pbmc, y.cutoff = 0.5)
+```
+
+
+```{r}
+## PCA -- note that it uses 1631 most variable genes!
+pbmc <- RunPCA(pbmc, pc.genes = pbmc@var.genes, do.print = TRUE, pcs.print = 5, genes.print = 5)
+pbmc <- ProjectPCA(pbmc)
+
+VizPCA(pbmc, 1:2)
+PCAPlot(pbmc, 1, 2)
+
+PCHeatmap(pbmc, pc.use = 1, cells.use = 100, do.balanced = TRUE)
+PCHeatmap(pbmc, pc.use = 1:4, cells.use = 500, do.balanced = TRUE, label.columns = FALSE, use.full = FALSE)
+
+## Find clusters (with 10 PCs)
+pbmc <- FindClusters(pbmc, dims.use = 1:20, resolution = 0.6, print.output = 0, save.SNN = T)
+
+table(as.integer(pbmc@ident), clus[paste0(names(pbmc@ident), '-1')])
+```
+
+```{r save_seurat}
+pbmc <- RunTSNE(pbmc, dims.use = 1:10, do.fast = T)
+TSNEPlot(pbmc)
+save(pbmc, file="tenx_pbmc4k/seurat.rda")
+```
+
+```{r markers}
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
+pbmc.markers %>% group_by(cluster) %>% top_n(2, avg_diff) %>% pull(gene)
+
+FeaturePlot(pbmc, c("MS4A1", "GNLY","CD3E","CD14","FCER1A","FCGR3A", "LYZ", "PPBP", "CD8A"),cols.use = c("grey","blue"))
+
+FeaturePlot(pbmc, c("CCL5", "S100A8","IL7R","CD8B","LEF1","TCL1A", "CCR7", "IGLC2", "GNLY", "LST1", "JCHAIN", "GZMB"),cols.use = c("grey","blue"))
+
+pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_diff) -> top10
+# setting slim.col.label to TRUE will print just the cluster IDS instead of every cell name
+DoHeatmap(pbmc, genes.use = top10$gene, order.by.ident = TRUE, slim.col.label = TRUE, remove.key = TRUE)
+```
+
+## Seurat on unfiltered, unnormalized data
+
+```{r seurat2}
+library(Seurat)
+library(dplyr)
+library(Matrix)
+
+pbmc.data <- Read10X("tenx_pbmc4k/outs/filtered_gene_bc_matrices/GRCh38/")
+
+pbmc <- CreateSeuratObject(pbmc.data, min.cells = 3, min.genes = 200, normalization.method = NULL, project = "10X_PBMC")
+
+#identify high variable genes
+pbmc <- MeanVarPlot(pbmc ,fxn.x = expMean, fxn.y = logVarDivMean, x.low.cutoff = 0.0125, x.high.cutoff = 3, y.cutoff = 0.5, do.contour = F)
+
+## PCA -- note that it uses 1631 most variable genes!
+pbmc <- PCA(pbmc, pc.genes = pbmc@var.genes, do.print = TRUE, pcs.print = 5, genes.print = 5)
+pbmc <- ProjectPCA(pbmc)
+
+VizPCA(pbmc, 1:2)
+PCAPlot(pbmc, 1, 2)
+
+PCHeatmap(pbmc, pc.use = 1, cells.use = 100, do.balanced = TRUE)
+
+PCHeatmap(pbmc, pc.use = 1:12, cells.use = 500, do.balanced = TRUE, label.columns = FALSE, use.full = FALSE)
+
+## Find clusters 
+pbmc <- FindClusters(pbmc, pc.use = 1:40, resolution = 1.2, print.output = 0, save.SNN = T)
+
+table(pbmc@ident, cl[paste0(names(pbmc@ident), "-1")])
+```
+
+Again, the results are not the same as in the website.
+
+Let's visualize the new data and clusters.
+
+```{r save_seurat2}
+pbmc <- RunTSNE(pbmc, dims.use = 1:40, do.fast = T)
+TSNEPlot(pbmc)
+save(pbmc, file="tenx_pbmc4k/seurat_no_norm.rda")
+```
+
+```{r markers2}
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
+pbmc.markers %>% group_by(cluster) %>% top_n(1, avg_diff) %>% pull(gene) -> gene_list
+
+FeaturePlot(pbmc, gene_list, cols.use = c("grey","blue"))
+
+pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_diff) -> top10
+# setting slim.col.label to TRUE will print just the cluster IDS instead of every cell name
+DoHeatmap(pbmc, genes.use = top10$gene, order.by.ident = TRUE, slim.col.label = TRUE, remove.key = TRUE)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
+
+
+

@@ -19,6 +19,7 @@ library(clusterExperiment) # pal = colors of the clusters
 library(scater) # calculateQC
 library(rARPACK) # fastpca
 library(dplyr)
+library(Rtsne)
 set.seed(8283)
 ```
 
@@ -57,12 +58,12 @@ se <- se[vargenes,]
 ```
 
 ```{r,eval=FALSE}
-system.time(zinb_res <- zinbFit(se, K = 3, epsilon = 10000))
-save(zinb_res, file = 'tenx_pbmc4k_zinb_k3.rda')
+system.time(zinb_res <- zinbFit(se, K = 10, epsilon = 10000))
+save(zinb_res, file = 'tenx_pbmc4k_zinb_k10.rda')
 ```
 
 ```{r load}
-load('tenx_pbmc4k_zinb_k3.rda')
+load('tenx_pbmc4k_zinb_k10.rda')
 ```
 
 ```{r pal}
@@ -71,11 +72,19 @@ pal <- clusterExperiment::bigPalette
 
 ```{r w}
 W <- getW(zinb_res)
+zinb_tsne <- Rtsne(W, pca = FALSE)
+```
+
+```{r}
 clus = colData(se)$graphclust
-plot(W, pch = 19, col = pal[clus], main = 'W')
-pairs(W, pch = 19, col = pal[clus])
-zinb_df <- data.frame(W1 = W[,1], W2 = W[,2], W3 = W[,3],
-                      Cluster=as.factor(clus))
+plot(zinb_tsne$Y, pch=19, col=pal[clus])
+```
+
+```{r}
+zinb_df = cbind(W, tsne1 = zinb_tsne$Y[,1], tsne2 = zinb_tsne$Y[,2])
+colnames(zinb_df)[1:ncol(W)] = paste0('W', 1:ncol(W))
+zinb_df <- as.data.frame(zinb_df)
+zinb_df$Cluster = as.factor(clus)
 ```
 
 ```{r}
@@ -98,22 +107,22 @@ geneExpr = lapply(markers, getExpression)
 geneExpr = do.call(cbind, geneExpr[sapply(geneExpr, length) > 0])
 zinb_df = cbind(zinb_df, geneExpr)
 
-ggplot(aes(W1, W2, colour=tcells), data = zinb_df) + 
+ggplot(aes(tsne1, tsne2, colour=tcells), data = zinb_df) + 
   geom_point() + scale_colour_gradient(low="blue", high="yellow")
 
-ggplot(aes(W1, W2, colour=unknown), data = zinb_df) + 
+ggplot(aes(tsne1, tsne2, colour=unknown), data = zinb_df) + 
   geom_point() + scale_colour_gradient(low="blue", high="yellow")
 
-ggplot(aes(W1, W2, colour=nk), data = zinb_df) + 
+ggplot(aes(tsne1, tsne2, colour=nk), data = zinb_df) + 
   geom_point() + scale_colour_gradient(low="blue", high="yellow")
 
-ggplot(aes(W1, W2, colour=myeloid), data = zinb_df) + 
+ggplot(aes(tsne1, tsne2, colour=myeloid), data = zinb_df) + 
   geom_point() + scale_colour_gradient(low="blue", high="yellow")
 ```
 
 ## Include QC in X
 
-Compute quality control measures and include first two PCs in X.
+Compute quality control measures and include first two PCs in X. I use K = 3 here to reduce the computation.
 
 ```{r}
 sce = as(se, "SingleCellExperiment")
@@ -159,11 +168,11 @@ ggplot(aes(W1, W2, colour=myeloid), data = zinb_df) +
 
 
 ```{r}
-cors <- lapply(1:3, function(i) abs(cor(W[,i], qc)))
+cors <- lapply(1:10, function(i) abs(cor(W[,i], qc)))
 cors <- unlist(cors)
 bars <- data.frame(AbsoluteCorrelation=cors,
-                   QC=rep(stringr::str_to_lower(colnames(qc)), 3),
-                   Dimension=as.factor(rep(1:3, each=ncol(qc))))
+                   QC=rep(stringr::str_to_lower(colnames(qc)), 10),
+                   Dimension=as.factor(rep(1:10, each=ncol(qc))))
 
 bars %>%
   ggplot(aes(Dimension, AbsoluteCorrelation, group=QC, fill=QC)) + 
@@ -185,6 +194,7 @@ bars %>%
   scale_fill_manual(values=pal) + ylim(0, 1) + ggtitle("Correlation bw W and QC (after adjusting)")
 ```
 
+It seems that including the QC isolate some cells. Not sure if we should remove these cells and rerun zinbwave. We would also need to look at the results when PCA of QC included in X and K = 10.
 
 ## PCA
 
@@ -197,8 +207,7 @@ norm10x = function (ei){
   return(eo)
 }
 
-fastpca <- function(expr, scale=FALSE) {
-  k <- 50
+fastpca <- function(expr, scale=FALSE, k = 50) {
   svd_raw <- svds(scale(t(expr), center=TRUE, scale=scale),
                   k=k, nu=k, nv=0)
   pc_raw <- svd_raw$u %*% diag(svd_raw$d[1:k])
@@ -210,8 +219,28 @@ load('../data/tenX_pbmc4k.rda')
 assay(se) = as.matrix(assay(se))
 # remove genes with only zero counts for normalization
 tc <- norm10x(assay(se)[rowSums(assay(se)) > 0, ]) 
-pc_tc <- fastpca(log1p(tc[vargenes,]))
+```
 
+We vizualize PCA using tsne. We try PCA with 10, 50, 100 principal components.
+```{r}
+pc_tc <- fastpca(log1p(tc[vargenes,]), k = 10)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col=pal[clus])
+```
+
+```{r}
+pc_tc <- fastpca(log1p(tc[vargenes,]), k = 50)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col=pal[clus])
+```
+
+```{r}
+pc_tc <- fastpca(log1p(tc[vargenes,]), k = 100)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col=pal[clus])
+```
+
+```{r}
 cors <- lapply(1:3, function(i) abs(cor(pc_tc[,i], qc)))
 cors <- unlist(cors)
 bars <- data.frame(AbsoluteCorrelation=cors,
@@ -222,10 +251,9 @@ bars %>%
   ggplot(aes(Dimension, AbsoluteCorrelation, group=QC, fill=QC)) + 
   geom_bar(stat="identity", position='dodge') + 
   scale_fill_manual(values=pal) + ylim(0, 1) + ggtitle("Correlation bw PCA and QC")
+```
 
-plot(pc_tc[,1:2], pch=19, col=pal[clus])
-pairs(pc_tc[,1:3], pch=19, col=pal[clus])
-
+```{r}
 save(pc_tc, file = "tenx_pbmc4k_pca.rda")
 ```
 

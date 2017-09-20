@@ -1,0 +1,465 @@
+---
+title: "Compare DE methods for 10X genomics - edgeR and us"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(edgeR)
+library(zingeR)
+library(RColorBrewer)
+library(ggplot2)
+```
+
+After running Seurat preprocessing (filtering, normalization, dimensionality reduction, clustering), we want to find DE genes between clusters using Seurat DE tool, edgeR, edgeR with our weights. Then, we'll perform gene enrichment analysis.
+
+```{r loadobject}
+load("core.rda")
+core = core[rowSums(assay(core)) > 0, ]
+core
+colData(core)$seurat = factor(colData(core)$seurat)
+```
+
+### Finding differentially expressed genes (cluster biomarkers)
+```{r fit}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+```
+
+```{r,eval=FALSE}
+library(doParallel)
+library(BiocParallel)
+NCORES = 2
+registerDoParallel(NCORES)
+register(DoparParam())
+print(system.time(zinb <- zinbFit(core, X = '~ seurat',
+                                  epsilon = 1e8)))
+save(zinb, file = 'zinb.rda')
+```
+
+```{r weightszinb}
+load('zinb.rda')
+counts = assay(core)
+weights_zinbwave = computeZinbwaveWeights(zinb, counts)
+hist(weights_zinbwave, main = 'zinbwave', xlab = 'Weights')
+```
+
+```{r}
+design = model.matrix(~ colData(core)$seurat)
+```
+
+# Run edgeR
+```{r fitedger}
+fit_edgeR <- function(counts, design, filter = NULL){
+  library(edgeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d = estimateDisp(d, design)
+  fit = glmFit(d, design)
+  glm = glmLRT(fit)
+  tab = glm$table
+  tab$padj = p.adjust(tab$PValue, "BH")
+  tab$gene = rownames(tab)
+  de <- as.data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padj', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r edgeR,eval=FALSE}
+edgeR <- fit_edgeR(counts, design)
+edgeR$method <- 'edgeR'
+```
+
+# Run edgeR with zinbwave weights
+```{r fitedgeRzi}
+fit_edgeR_zi <- function(counts, design, weights,
+                         filter = NULL){
+  library(edgeR)
+  library(zingeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d$weights <- weights 
+  d = estimateDisp(d, design)
+  fit = glmFit(d,design)
+  glm = glmWeightedF(fit, filter = filter)
+  tab = glm$table
+  tab$gene = rownames(tab)
+  de <- data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padjFilter', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r zinbwaveedgeR,eval=FALSE}
+# check if filter ok with baseMean, not sure
+# filter just affect adjusted pvalues and we don't use 
+# much pvalues
+nf <- edgeR::calcNormFactors(counts)
+baseMean = unname(rowMeans(sweep(counts,2,nf,FUN="*")))
+zinbwave_edgeR <- fit_edgeR_zi(counts, design, 
+                            weights = weights_zinbwave,
+                            filter = baseMean)
+zinbwave_edgeR$method <- 'zinbwave_edgeR'
+```
+
+
+# Run DESeq2 with zinbwave weights
+```{r fitDESeq2zi}
+fit_DESeq2_zi <- function(counts, design, weights){
+  library(DESeq2)
+  cData = data.frame(clusters = factor(design[,2]))
+  rownames(cData) = colnames(counts)
+  dds <- DESeqDataSetFromMatrix(counts, colData =cData, design = ~ clusters)
+  dds$design <- design
+  assays(dds)[["weights"]] <- weights
+  dds <- estimateSizeFactors(dds, type = "poscounts")
+  dds <- estimateDispersions(dds)
+  dds <- nbinomWaldTest(dds, betaPrior = TRUE, useT = TRUE, 
+                        df = rowSums(weights) - 2)
+  tab <- results(dds)
+  tab$gene = rownames(tab)
+  de <- data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'pvalue', 'padj', 'log2FoldChange')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r zinbwavedeseq2,eval=FALSE}
+zinbwave_deseq2 <- fit_DESeq2_zi(counts, design, weights = weights_zinbwave)
+zinbwave_deseq2$method <- 'zinbwave_DESeq2'
+```
+
+# Run DESeq2
+```{r fitDESeq2}
+fit_DESeq2 <- function(counts, design){
+  library(DESeq2)
+  cData = data.frame(clusters = factor(design[,2]))
+  rownames(cData) = colnames(counts)
+  dds <- DESeqDataSetFromMatrix(counts, colData =cData, design = ~ clusters)
+  dds$design <- design
+  dds <- estimateSizeFactors(dds, type = "poscounts")
+  dds <- estimateDispersions(dds)
+  dds <- nbinomWaldTest(dds, betaPrior = TRUE)
+  tab <- results(dds)
+  tab$gene = rownames(tab)
+  de <- data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'pvalue', 'padj', 'log2FoldChange')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r deseq2,eval=FALSE}
+deseq2 <- fit_DESeq2(counts, design)
+deseq2$method <- 'DESeq2'
+```
+
+# Run MAST
+```{r}
+runMAST <- function(counts, design){
+  require(MAST)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm, cData=data.frame(group=design[,2]))
+  
+  # Adaptive thresholding from MAST vignette
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 50, min_per_bin = 50,
+                                     conditions = design[,2])
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  
+  ngeneson <- apply(counts,2,function(x) mean(x>0))
+  
+  # include gene detection prop in the covariates
+  CD <- colData(sca)
+  CD$ngeneson <- ngeneson
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  
+  ## differential expression
+  fit <- zlm(~ cngeneson + group, sca = sca, method = "bayesglm", ebayes = TRUE)
+  summaryCond <- summary(fit, doLRT = 'group') 
+  summaryDt <- summaryCond$datatable
+  tab <- merge(summaryDt[contrast=='group' & component=='H', 
+                         .(primerid, `Pr(>Chisq)`)], 
+               summaryDt[contrast=='group' & component=='logFC',
+                         .(primerid, coef)], by='primerid')
+  pval <- tab[, `Pr(>Chisq)`]
+  padj <- p.adjust(pval, method = "BH")
+  data.frame(gene = tab$primerid, pval= pval, padj = padj, logfc = tab$coef)
+}
+```
+
+```{r mast,eval=FALSE}
+mast <- runMAST(counts, design)
+mast$method <- 'MAST'
+```
+
+# Run Limma-voom
+```{r runlimmavoom}
+runLimmavoom <- function(counts, design) {
+  library(limma)
+  library(edgeR)
+  dgel <- DGEList(counts)
+  dgel <- edgeR::calcNormFactors(dgel)
+  v <- voom(dgel,design,plot=FALSE)
+  fit <- lmFit(v,design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef=2,n=nrow(dgel),sort.by="none")
+  pvals <- tt$P.Value
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  data.frame(gene = rownames(tt), pval=pvals, padj=padj, logfc=tt$logFC)
+}
+```
+
+```{r limmavoom,eval=FALSE}
+voom <- runLimmavoom(counts, design)
+voom$method <- 'limmavoom'
+```
+
+# Load Seurat results
+```{r}
+seurat = read.csv('tcellmarkers_seurat.csv')
+seurat$padj = NA
+seurat$method = 'seurat'
+seurat = seurat[, c('gene', 'p_val', 'padj', 'avg_diff', 'method')]
+colnames(seurat) = colnames(mast)
+```
+
+# Concatenate all the result tables
+```{r}
+# zinbwave_deseq2, deseq2,
+de = rbind(edgeR, seurat, voom, mast, zinbwave_edgeR)
+write.csv(de, file = 'deGenes.csv', row.names = FALSE)
+```
+
+```{r}
+de = read.csv('deGenes.csv', stringsAsFactors = FALSE)
+head(de,2)
+```
+
+# Compare methods
+
+## GSEA pre ranked
+```{r}
+library(xCell) # for db
+library(fgsea)
+library(GSEABase)
+
+## extract genesets from xcell
+genesets <- unlist(geneIds(xCell.data$signatures))
+celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
+names(genesets) <- NULL
+gs <- tapply(genesets, celltypes, c)
+de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.005) 
+# MAST creates NAs for log fold change but fgsea does not handle NAs, so I artificially creates small log fold change. rnorm with mean = 0, and not 0 because fgsea does not handle tights.
+set.seed(6372)
+gsea_res = lapply(unique(de$method), function(x){
+  print(x)
+  temp = de[de$method == x, ]
+  degenes = temp$logfc
+  if (x == 'seurat') degenes = - degenes # reverse design matrix in seurat
+  names(degenes) = temp$gene
+  gsea = fgsea(gs, degenes, nperm = 10000, minSize = 5)
+  gsea$method = x
+  gsea[order(-abs(gsea$NES)), ]
+})
+lapply(gsea_res, head)
+```
+
+```{r}
+gseaDf = as.data.frame(do.call(rbind, gsea_res))
+gseaDf = gseaDf[gseaDf$size > 100, ]
+gseaDf = gseaDf[, c('method', 'pathway', 'NES')]
+gseaDf$method = factor(gseaDf$method, levels = c('edgeR', 'seurat', 'MAST', 'limmavoom', 'zinbwave_edgeR'))
+sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
+sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
+gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
+```
+
+```{r}
+ggplot(gseaDf, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, space = "Lab", 
+    name="Enrichment score")
+```
+
+```{r}
+nes = gseaDf[grepl('CD4', gseaDf$pathway), 'NES']
+limit = max(abs(min(nes)), max(nes))
+ggplot(gseaDf[grepl('CD4', gseaDf$pathway), ], aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, space = "Lab", name="Enrichment score", 
+   limit = c(-limit, limit))
+```
+
+```{r}
+groups = grep('CD4+', gsea_res[[1]]$pathway, value =T)
+lapply(gsea_res, function(x){
+  x[x$pathway %in% groups, ]
+})
+```
+
+
+## Histogram of pvalues
+
+We are expecting uniformity of the pvalue with a pick close to zero corresponding to DE genes.
+
+```{r hist}
+par(mfrow= c(3,3))
+for (x in unique(de$method)){
+  hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 3000),
+       xlab = 'pvalue')
+}
+par(mfrow= c(1,1))
+```
+
+## Volcano plots
+
+I think it should be adjusted pvalues instead. In edgeR and DESeq2, I think there are functions to filter genes with high fold change but low pvalue. TODO: look at that to improve volcano plots.
+```{r}
+par(mfrow=c(3,3))
+for (x in unique(de$method)){
+  temp = de[de$method == x, ]
+  plot(temp[, 'logfc'], -log10(temp[, 'pval']),
+       pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 50),
+       ylab = '-log10(pvalue)', xlab = 'logFC', main = x)
+}
+par(mfrow=c(1,1))
+```
+
+## Concordance between DE genes
+### Venn diagram
+
+```{r}
+thr = 0.05
+```
+
+DE genes are genes with an adjusted pvalue lower than `r thr`.
+
+```{r venn,eval=FALSE}
+library(dplyr)
+ve = de %>% group_by(method, gene) %>%
+  summarize(pval = min(pval, na.rm=TRUE)) %>%
+  ungroup() %>% as.data.frame()
+ve$de = ve$pval < thr
+ve = reshape2::acast(ve[, c(1,2,4)], gene ~ method, sum)
+
+aa <- vennCounts(ve)
+vennDiagram(aa, main = 'DE gene, adj pvalue < 0.05')
+```
+
+
+## Most DE genes per method in terms of pvalue
+```{r}
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp$rank = rank(temp$pval)
+  temp
+})
+de = do.call(rbind, ranks)
+
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp = temp[temp$rank < 10, ]
+  temp[order(temp$rank), ]
+})
+names(ranks) = unique(de$method)
+ranks
+```
+
+## Most DE genes per method in terms of fold change
+```{r}
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp$rank = rank(-abs(temp$logfc))
+  temp
+})
+de = do.call(rbind, ranks)
+
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp = temp[temp$rank < 10, ]
+  temp[order(temp$rank), ]
+})
+names(ranks) = unique(de$method)
+ranks
+```
+
+## Heatmaps 
+
+```{r tcnorm}
+norm10x <- function (ei){
+  sums = colSums(ei)
+  t(t(ei)*median(sums)/sums)
+}
+tc = norm10x(counts) 
+tc = log1p(tc)
+```
+
+```{r heatmaptc}
+library(clusterExperiment)
+tt = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  degenes = temp[order(temp[, 'pval'])[1:10], 'gene']
+  cc = as.numeric(colData(core)$seurat)
+  plotHeatmap(tc[rownames(tc) %in% degenes, ], main = x,
+              breaks = .99,
+              sampleData = data.frame(clusters = cc))
+})
+```
+
+## Visualize clustering with DE genes
+
+DE genes are genes with a pvalue lower than `r thr`. We subset the data to keep only DE genes and visualize the clusters in 2D.
+
+```{r pcaDE}
+library(rARPACK) 
+library(Rtsne)
+fastpca <- function(expr, scale=FALSE, k = 25) {
+  svd_raw <- svds(scale(t(expr), center=TRUE, scale=scale),
+                  k=k, nu=k, nv=0)
+  pc_raw <- svd_raw$u %*% diag(svd_raw$d[1:k])
+  return(pc_raw)
+}
+
+par(mfrow = c(3,3))
+for (x in unique(de$method)){
+  temp = de[de$method == x, ]
+  degenes = temp[temp$pval< 0.05, 'gene']
+  ngenes = length(degenes)
+  pca = fastpca(tc[rownames(tc) %in% degenes, ])
+  pca_tsne <- Rtsne(pca, pca = FALSE)
+  plot(pca_tsne$Y, pch=19, col=as.numeric(colData(core)$seurat),
+       main=paste(x, ', ', ngenes, ' DE genes'))
+}
+par(mfrow = c(1,1))
+```
+
+
+
