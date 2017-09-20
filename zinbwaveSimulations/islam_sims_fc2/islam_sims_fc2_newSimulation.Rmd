@@ -308,7 +308,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeZinbwaveWeights(zinb, counts(dse))
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -347,14 +347,14 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-#zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
-#save(zinb_c, file = 'zinb-common-disp-fc2.rda')
+zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+save(zinb_c, file = 'zinb-common-disp-fc2.rda')
 load('zinb-common-disp-fc2.rda')
 ```
 
 ```{r zinbgenewisedisp}
-#zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
-#save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
+zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
+save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
 load('zinb-genewise-disp-fc2.rda')
 ```
 

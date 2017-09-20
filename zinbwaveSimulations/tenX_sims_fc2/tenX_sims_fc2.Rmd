@@ -304,6 +304,7 @@ zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
 ## zinbwave
 
 We compute the same weights as zingeR (i.e. posterior probabilities that a count belongs to the count component given that the count and library size is observed), but using the ZINB-WaVE estimation procedure. See more details here (http://www.biorxiv.org/content/early/2017/04/06/125112).
+
 ```{r}
 NCORES <- 2
 registerDoParallel(NCORES)
@@ -411,14 +412,14 @@ res = lapply(myfct, function(fct){
   fct(counts = counts, group = grp, ylim = ylim, xlim = xlim)
 })
 res[['ZINB-WaVE_DESeq2_common']] = zinbwave_DESeq2(counts, grp, zinb_c)
-res[['ZINB-WaVE_edgeR_common']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB_WaVE_edgeR_common']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_common']]  = zinbwave_limma(counts, grp, zinb_c)
 res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
 
-res[['zingeR-edgeR']] = zingeR_edgeR(counts, grp)
+res[['zingeR_edgeR']] = zingeR_edgeR(counts, grp)
 ```
 
 ```{r}
@@ -428,9 +429,17 @@ for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 
 ## Compare weights estimates
 
+Very similar.
+
 ```{r zinbwaveW}
+zingeREdgeRWeights = zingeR::zeroWeightsLS(counts=simData$counts, design=model.matrix(~grp), maxit=250, llTol=1e-1, llOffset=1e-2, verbose=TRUE, plotW=TRUE)
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
+hist(zinbwave_c_weights[simData$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+hist(zinbwave_c_weights[simData$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
+
 zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
+hist(zinbwave_g_weights[simData$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+hist(zinbwave_g_weights[simData$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 ```
 
 ```{r tenxWeightsFC2}
@@ -498,10 +507,10 @@ plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
 ```
 
 ```{r tenxROCfc2}
-res10 = res[1:10]
-names(res10) = gsub('_common', '', names(res10))
-pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res10, '[[', 1))),
-               padj = as.data.frame(do.call(cbind, lapply(res10, '[[', 2))),
+#res10 = res[1:10]
+#names(res10) = gsub('_common', '', names(res10))
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 
@@ -511,30 +520,29 @@ brown =  brewer.pal(8, "Dark2")[4]
 greens = rev(brewer.pal(11, "PiYG"))[1:3]
 mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
           blues[3], greens[3], reds[3], 'black')
-names(mycol) = c(names(res10), 'truth')
+names(mycol) = names(res)
 #names(cobraperf@overlap) = names(mycol)
 colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
                                    facetted = FALSE)
 
-p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
-                       linewidth = .5, xaxisrange = c(0, .5)) +
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2, linewidth = .5, xaxisrange = c(0, .4), yaxisrange=c(0,0.4)) +
   theme(axis.text.x = element_text(size = 10),
         axis.text.y = element_text(size = 10),
         axis.title.x = element_text(size = 15),
         axis.title.y = element_text(size = 15),
-        legend.text=element_text(size=7)) + theme(legend.position="none")
+        legend.text=element_text(size=7)) + theme(legend.position="bottom")
 
-orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
-p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
-                       linewidth = .5, xaxisrange = c(0, .5)) +
-  theme(legend.text=element_text(size=7)) +
-  scale_color_manual(labels = names(colsCobra)[orderLegend],
-                     values = unname(colsCobra)[orderLegend],
-                     name = 'Method')
-legend <- get_legend(p2)
-
-plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
+#orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
+# p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
+#                        linewidth = .5, xaxisrange = c(0, .5)) +
+#   theme(legend.text=element_text(size=7)) +
+#   scale_color_manual(labels = names(colsCobra)[orderLegend],
+#                      values = unname(colsCobra)[orderLegend],
+#                      name = 'Method')
+# legend <- get_legend(p2)
+#
+# plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
 
 ```
 

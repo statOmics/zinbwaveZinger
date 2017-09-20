@@ -97,19 +97,22 @@ dds_origTrapnell <- DESeqDataSetFromMatrix(countData = countsTrapnellCompare[row
                                   colData = data.frame(group = timePoint, sample = colnames(countsTrapnell), row.names = colnames(countsTrapnell), stringsAsFactors = FALSE), design = ~ group)
 ### 10x 4k PBMC dataset
 load("~/tenxPBMC.rda") #from `create-se-object.Rmd` file from Fanny.
+library(cellrangerRkit)
+analysis_results <- load_cellranger_analysis_results("../../..")
+cl <- analysis_results[["clustering"]][["graphclust"]][,'Cluster']
+names(cl) <- analysis_results[["clustering"]][["graphclust"]][,'Barcode']
+selectedCells = cl %in% 2:3
+se = se[,selectedCells]
+celltype = as.factor(cl[selectedCells])
 tenxCompare = assays(se)$counts
+
+#filter genes
+set.seed(23984)
 keep = rowMeans(assays(se)$counts>0)>=0.01 #expression in 1% of cells.
 se = se[keep,]
-
-#get subset of data
-set.seed(23984)
-simCells = sample(ncol(se),500)
-seSim = se[,simCells]
-set.seed(1)
 rowsTenx = sample(nrow(tenxCompare),nrow(se))
-dds_origTenx <- DESeqDataSetFromMatrix(countData = tenxCompare[rowsTenx,simCells],
-                                  colData = data.frame(sample = colnames(seSim), row.names = colnames(seSim), stringsAsFactors = FALSE), design = ~ 1)
-
+dds_origTenx <- DESeqDataSetFromMatrix(countData = tenxCompare[rowsTenx,],
+                                  colData = data.frame(celltype = celltype, sample = colnames(se), row.names = colnames(se), stringsAsFactors = FALSE), design = ~ celltype)
 ```
 
 
@@ -117,137 +120,137 @@ dds_origTenx <- DESeqDataSetFromMatrix(countData = tenxCompare[rowsTenx,simCells
 
 ```{r}
 ####### on positive counts
-getExprFraction4 = function(counts, offset){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
-  sum(countsModel)/sum(offsetModel)
-}
-
-getPhiMoMPositive4 = function(counts, lambda, offset){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
-    mu=lambda*offsetModel
-    phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
-    return(phi)
-}
-
-reEstimateExprFraction4 = function(counts, offset, lambda, phi){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
-    mu=lambda*offsetModel
-  sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
-}
-
-reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
-    mu=lambda*offsetModel
-    phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
-    return(phi)
-}
-
-
-
-getDatasetMoMPositive = function(counts, design, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=10){
-
-        #### estimate lambda and overdispersion based on ZTNB.
-	d <- DGEList(counts)
-	cp <- cpm(d,normalized.lib.sizes=TRUE)
-	dFiltered=d
-	dFiltered <- edgeR::calcNormFactors(dFiltered)
-  dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
-  ## estimate
-  lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction4(counts=x, offset=colSums(dFiltered$counts)))
-  dispMoM = vector(length=nrow(dFiltered$counts))
-  for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
-  dispMoM[dispMoM<0] = 1e-5
-
-  for(j in 1:MoMIter){
-  for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
-  for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
-  dispMoM[dispMoM<0] = 1e-5
-  }
-
-  ## assume convergence
-  params=cbind(dispMoM,lambdaMoM)
-	rmRows = which(params[,2]>1) #impossibly high lambda
-	rmRows2 = which(params[,2]==0) #zero lambda
-	naRows = which(apply(params,1, function(row) any(is.na(row)))) #not fitted
-	nonZeroDispRows = which(params[,1]<0 | params[,1]==0) #negative dispersion
-	throwRows = c(rmRows,rmRows2,naRows,nonZeroDispRows)
-  if(length(throwRows)>0) params = params[-throwRows,]
-
-	### estimate logistic GAM P(zero) ~ s(aveLogCPM) + logLibSize
-	### use unfiltered data for this model.
-  require(mgcv)
-	propZero = colMeans(counts==0)
-	propZeroGene = rowMeans(counts==0)
-	d <- DGEList(counts)
-	d <- edgeR::calcNormFactors(d)
-	if(cpm=="AveLogCPM"){ avCpm <- aveLogCPM(d)} else if(cpm=="aCpm"){ avCpm <- aCPM(d$counts)} else {stop("cpm must be either AveLogCPM or aCPM")}
-	cpmHist = hist(avCpm, breaks=150, plot=FALSE)
-    	breaks = cpmHist$breaks
-    	mids = cpmHist$mids
-    	midsHlp=rep(mids,ncol(d$counts))
-	logLibSize = log(colSums(counts))
-    	logLibHlp=rep(logLibSize,each=length(mids))
-	binHlp=sapply(breaks[-length(breaks)],function(x) avCpm>x)
-  	binId=apply(binHlp,1,function(x) max(which(x)))
-	nonNullCounts = t(sapply(1:length(mids), function(bin){
-			    binRows <- binId==bin
-			    if(sum(binRows)==0) rep(0,ncol(counts)) else
-			    if(sum(binRows)==1) (counts[which(binRows),]!=0)*1 else
-				colSums(counts[which(binRows),]!=0)
-	    }))
-	nullCounts = t(sapply(1:length(mids), function(bin){
-		    	binRows <- binId==bin
-		    	if(sum(binRows)==0) rep(0,ncol(counts)) else
-		    	if(sum(binRows)==1) (counts[which(binRows),]==0)*1 else
-			    colSums(counts[which(binRows),]==0)
-	    }))
-	expectCounts=cbind(c(nullCounts),c(nonNullCounts))
-	#zeroFit=mgcv::gam(expectCounts~s(midsHlp)+logLibHlp,family=binomial)
-	zeroFit=gam(expectCounts~s(midsHlp,by=logLibHlp),family=binomial)
-
-	### drop extreme dispersions
-  dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
-	if(length(throwRows)>0) dFiltered$AveLogCPM <- dFiltered$AveLogCPM[-throwRows]
-	if(length(throwRows)>0) propZeroGene = propZeroGene[-throwRows]
-	params=data.frame(dispersion=params[,1], lambda=params[,2], aveLogCpm=dFiltered$AveLogCPM, propZeroGene=propZeroGene)
-	dispersion <- params$dispersion
-	AveLogCPM <- params$aveLogCpm
-	lambda <- params$lambda
-	propZeroGene <- params$propZeroGene
-
-	if(is.numeric(drop.extreme.dispersion))
-	{
-		bad <- quantile(dispersion, 1-drop.extreme.dispersion, names = FALSE, na.rm=TRUE)
-		ids <- dispersion <= bad
-		AveLogCPM <- AveLogCPM[ids]
-		dispersion <- dispersion[ids]
-		lambda <- lambda[ids]
-		propZeroGene <- propZeroGene[ids]
-		params <- params[ids,]
-		dFiltered <- dFiltered[ids,]
-	}
-	#lambda=lambda/sum(lambda) #make sure they sum to 1
-	dataset.AveLogCPM <- AveLogCPM
-	dataset.dispersion <- dispersion
-	dataset.lambda <- lambda
-	dataset.propZeroGene <- propZeroGene
-	dataset.lib.size <- d$samples$lib.size
-	dataset.nTags <- nrow(d)
-	list(dataset.AveLogCPM = dataset.AveLogCPM, dataset.dispersion = dataset.dispersion, dataset.lib.size = dataset.lib.size, dataset.nTags = dataset.nTags, dataset.propZeroFit=zeroFit, dataset.lambda=lambda, dataset.propZeroGene=propZeroGene, dataset.breaks = breaks, dataset.cpm=cpm)
-}
+# getExprFraction4 = function(counts, offset){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#   sum(countsModel)/sum(offsetModel)
+# }
+#
+# getPhiMoMPositive4 = function(counts, lambda, offset){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#     mu=lambda*offsetModel
+#     phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
+#     return(phi)
+# }
+#
+# reEstimateExprFraction4 = function(counts, offset, lambda, phi){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#     mu=lambda*offsetModel
+#   sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
+# }
+#
+# reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
+#     countsModel = counts[counts>0]
+#     offsetModel = offset[counts>0]
+#     mu=lambda*offsetModel
+#     phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+#     return(phi)
+# }
+#
+#
+#
+# getDatasetMoMPositive = function(counts, design, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=10){
+#
+#         #### estimate lambda and overdispersion based on ZTNB.
+# 	d <- DGEList(counts)
+# 	cp <- cpm(d,normalized.lib.sizes=TRUE)
+# 	dFiltered=d
+# 	dFiltered <- edgeR::calcNormFactors(dFiltered)
+#   dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
+#   ## estimate
+#   lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction4(counts=x, offset=colSums(dFiltered$counts)))
+#   dispMoM = vector(length=nrow(dFiltered$counts))
+#   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
+#   dispMoM[dispMoM<0] = 1e-5
+#
+#   for(j in 1:MoMIter){
+#   for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
+#   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
+#   dispMoM[dispMoM<0] = 1e-5
+#   }
+#
+#   ## assume convergence
+#   params=cbind(dispMoM,lambdaMoM)
+# 	rmRows = which(params[,2]>1) #impossibly high lambda
+# 	rmRows2 = which(params[,2]==0) #zero lambda
+# 	naRows = which(apply(params,1, function(row) any(is.na(row)))) #not fitted
+# 	nonZeroDispRows = which(params[,1]<0 | params[,1]==0) #negative dispersion
+# 	throwRows = c(rmRows,rmRows2,naRows,nonZeroDispRows)
+#   if(length(throwRows)>0) params = params[-throwRows,]
+#
+# 	### estimate logistic GAM P(zero) ~ s(aveLogCPM) + logLibSize
+# 	### use unfiltered data for this model.
+#   require(mgcv)
+# 	propZero = colMeans(counts==0)
+# 	propZeroGene = rowMeans(counts==0)
+# 	d <- DGEList(counts)
+# 	d <- edgeR::calcNormFactors(d)
+# 	if(cpm=="AveLogCPM"){ avCpm <- aveLogCPM(d)} else if(cpm=="aCpm"){ avCpm <- aCPM(d$counts)} else {stop("cpm must be either AveLogCPM or aCPM")}
+# 	cpmHist = hist(avCpm, breaks=150, plot=FALSE)
+#     	breaks = cpmHist$breaks
+#     	mids = cpmHist$mids
+#     	midsHlp=rep(mids,ncol(d$counts))
+# 	logLibSize = log(colSums(counts))
+#     	logLibHlp=rep(logLibSize,each=length(mids))
+# 	binHlp=sapply(breaks[-length(breaks)],function(x) avCpm>x)
+#   	binId=apply(binHlp,1,function(x) max(which(x)))
+# 	nonNullCounts = t(sapply(1:length(mids), function(bin){
+# 			    binRows <- binId==bin
+# 			    if(sum(binRows)==0) rep(0,ncol(counts)) else
+# 			    if(sum(binRows)==1) (counts[which(binRows),]!=0)*1 else
+# 				colSums(counts[which(binRows),]!=0)
+# 	    }))
+# 	nullCounts = t(sapply(1:length(mids), function(bin){
+# 		    	binRows <- binId==bin
+# 		    	if(sum(binRows)==0) rep(0,ncol(counts)) else
+# 		    	if(sum(binRows)==1) (counts[which(binRows),]==0)*1 else
+# 			    colSums(counts[which(binRows),]==0)
+# 	    }))
+# 	expectCounts=cbind(c(nullCounts),c(nonNullCounts))
+# 	#zeroFit=mgcv::gam(expectCounts~s(midsHlp)+logLibHlp,family=binomial)
+# 	zeroFit=gam(expectCounts~s(midsHlp,by=logLibHlp),family=binomial)
+#
+# 	### drop extreme dispersions
+#   dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
+# 	if(length(throwRows)>0) dFiltered$AveLogCPM <- dFiltered$AveLogCPM[-throwRows]
+# 	if(length(throwRows)>0) propZeroGene = propZeroGene[-throwRows]
+# 	params=data.frame(dispersion=params[,1], lambda=params[,2], aveLogCpm=dFiltered$AveLogCPM, propZeroGene=propZeroGene)
+# 	dispersion <- params$dispersion
+# 	AveLogCPM <- params$aveLogCpm
+# 	lambda <- params$lambda
+# 	propZeroGene <- params$propZeroGene
+#
+# 	if(is.numeric(drop.extreme.dispersion))
+# 	{
+# 		bad <- quantile(dispersion, 1-drop.extreme.dispersion, names = FALSE, na.rm=TRUE)
+# 		ids <- dispersion <= bad
+# 		AveLogCPM <- AveLogCPM[ids]
+# 		dispersion <- dispersion[ids]
+# 		lambda <- lambda[ids]
+# 		propZeroGene <- propZeroGene[ids]
+# 		params <- params[ids,]
+# 		dFiltered <- dFiltered[ids,]
+# 	}
+# 	#lambda=lambda/sum(lambda) #make sure they sum to 1
+# 	dataset.AveLogCPM <- AveLogCPM
+# 	dataset.dispersion <- dispersion
+# 	dataset.lambda <- lambda
+# 	dataset.propZeroGene <- propZeroGene
+# 	dataset.lib.size <- d$samples$lib.size
+# 	dataset.nTags <- nrow(d)
+# 	list(dataset.AveLogCPM = dataset.AveLogCPM, dataset.dispersion = dataset.dispersion, dataset.lib.size = dataset.lib.size, dataset.nTags = dataset.nTags, dataset.propZeroFit=zeroFit, dataset.lambda=lambda, dataset.propZeroGene=propZeroGene, dataset.breaks = breaks, dataset.cpm=cpm)
+# }
 
 ####################################
 ######### EVALUATE #################
 ####################################
 
 #### islam
-paramsIslam = getDatasetMoMPositive(counts=islam, design=model.matrix(~cellType))
+paramsIslam = getDatasetMoMPositive(counts=islam)
 
-source("./NBsimSingleCellUnnormalizedLambda.R")
+#source("./NBsimSingleCellUnnormalizedLambda.R")
 nSamples=ncol(islam)
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=nrow(islam) #nr of features
@@ -269,8 +272,8 @@ dds_zingerIslam <- DESeqDataSetFromMatrix(countData = islamSim$counts,
                                     design = ~ group)
 
 countsimQCReport(ddsList=list(original=dds_origIslam,zingeR=dds_zingerIslam),
-                  outputFile="~/islamMoMPositiveUnnormalizedGoodComparisonImprovedEstimator.html",
-                  description = "islam dataset, unnormalized MoM positive")
+                  outputFile="~/islamMoMNewDefaultSim.html",
+                  description = "islam dataset, unnormalized MoM positive, new defaults in simulation", calculateStatistics=FALSE)
 
 ### GSE74596
 paramsGSE = getDatasetMoMPositive(counts=countsGSE)
@@ -292,19 +295,16 @@ GSESim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
 dds_zingerGSE <- DESeqDataSetFromMatrix(countData = GSESim$counts,
                       colData = data.frame(group = grp, sample = colnames(GSESim$counts), row.names = colnames(GSESim$counts), stringsAsFactors = FALSE), design = ~ group)
 
-# countsimQCReport(ddsList=list(original=dds_origGSE74596,zingeR=dds_zingerGSE),
-#                 outputFile="~/GSEMoMPositiveUnnormalizedGoodComparisonImrpovedEstimator.html",
-#                 description="GSE dataset, unnormalized Method of Moments on positive counts")
 
 countsimQCReport(ddsList=list(original=dds_origGSE74596,zingeR=dds_zingerGSE),
                 outputFile="~/GSEMoMNewDefaultSim.html",
                 description="GSE dataset, unnormalized Method of Moments on positive counts, new defaults in simulation",
-              calculateStatictics=FALSE)
+              calculateStatistics=FALSE)
 
 ### trapnell
-paramsTrapnell = getDatasetMoMPositive(counts=countsTrapnell, design=model.matrix(~timePoint))
+paramsTrapnell = getDatasetMoMPositive(counts=countsTrapnell)
 
-source("./NBsimSingleCellUnnormalizedLambda.R")
+#source("./NBsimSingleCellUnnormalizedLambda.R")
 nSamples=ncol(countsTrapnell)-1
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=nrow(countsTrapnell) #nr of features
@@ -320,35 +320,32 @@ trapnellSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
 
 dds_zingerTrapnell <- DESeqDataSetFromMatrix(countData = trapnellSim$counts, colData = data.frame(group = grp, sample = colnames(trapnellSim$counts), row.names = colnames(trapnellSim$counts), stringsAsFactors = FALSE), design = ~ group)
 
-countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellMoMPositiveUnnormalizedGoodComparison.html", description="trapnell dataset, unnormalized Method of Moments on positive counts")
+countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellMoMNewDefaultSim.html", description="trapnell dataset, unnormalized Method of Moments on positive counts, new defaults in simulation",
+calculateStatistics=FALSE)
 
 ### 10x 4k pbmc dataset.
 
 ## estimate parameters
-groupTenx = rep(1,500)
-design = model.matrix(~0 + groupTenx)
-paramsTenx = getDatasetMoMPositive(counts=assays(seSim)$counts, design=design)
+paramsTenx = getDatasetMoMPositive(counts=assays(se)$counts)
 
-source("./NBsimSingleCellUnnormalizedLambda.R")
-source("./NBsimSingleCellNormalizedLambda.R")
-
-nSamples=ncol(seSim)
+#source("./NBsimSingleCellNormalizedLambda.R")
+nSamples=ncol(se)
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
-nTags=nrow(seSim) #nr of features
+nTags=nrow(se) #nr of features
 set.seed(11)
 DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
 fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
-libSizes=sample(colSums(assays(seSim)$counts),nSamples,replace=TRUE) #library sizes
+libSizes=sample(colSums(assays(se)$counts),nSamples,replace=TRUE) #library sizes
 tenxSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
-                          dataset = countsTrapnell, nTags = nTags,
+                          dataset = assays(se)$counts, nTags = nTags,
                           group = grp,
                           verbose = TRUE, params = paramsTenx,
                           lib.size = libSizes)
 
 
-dds_zingerTenx <- DESeqDataSetFromMatrix(countData = tenxSim$counts, colData = data.frame( sample = colnames(tenxSim$counts), row.names = colnames(tenxSim$counts), stringsAsFactors = FALSE), design = ~ 1)
+dds_zingerTenx <- DESeqDataSetFromMatrix(countData = tenxSim$counts, colData = data.frame(grp=grp, sample = colnames(tenxSim$counts), row.names = colnames(tenxSim$counts), stringsAsFactors = FALSE), design = ~ grp)
 
-countsimQCReport(ddsList=list(original=dds_origTenx,zingeR=dds_zingerTenx), outputFile="~/tenxPositiveNormalizedGoodComparison.html", description="tenx dataset, normalized Method of Moments on positive counts")
+countsimQCReport(ddsList=list(original=dds_origTenx,zingeR=dds_zingerTenx), outputFile="~/tenxMoMNewDefaultSim.html", description="tenx dataset, normalized Method of Moments on positive counts, new defaults", calculateStatistics=FALSE)
 
 
 ```
@@ -358,6 +355,7 @@ countsimQCReport(ddsList=list(original=dds_origTenx,zingeR=dds_zingerTenx), outp
 ## check dispersion estimates
 
 ### negative binomial
+set.seed(77)
 lambdas = matrix(rep(seq(1e-6,4e-6,length=181),each=100),ncol=100, byrow=TRUE)
 phi = matrix(rep(seq(0.01,7,length.out=181),each=100),ncol=100, byrow=TRUE)
 libSize = runif(n=100,min=1e6,max=1.5e6)
