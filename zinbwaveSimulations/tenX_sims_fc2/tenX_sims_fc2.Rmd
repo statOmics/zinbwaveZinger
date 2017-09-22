@@ -32,7 +32,7 @@ library(ggplot2)
 library(cowplot)
 # use new simulation.
 pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
-source(paste0(pathToParentFolder,"zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R"))
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
 ```
 
 ```{r}
