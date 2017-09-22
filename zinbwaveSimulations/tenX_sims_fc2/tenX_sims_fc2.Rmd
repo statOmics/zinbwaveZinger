@@ -1,6 +1,6 @@
 ---
 title: "Simulations from 10x-genomic dataset, fold change 2"
-author: "Fanny Perraudeau"
+author: "Fanny Perraudeau & Koen Van den Berge"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -32,12 +32,14 @@ library(ggplot2)
 library(cowplot)
 # use new simulation.
 pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
-source("zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
+source(paste0(pathToParentFolder,"zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R"))
 ```
 
 ```{r}
 set.seed(8283) #just to make sure rmd is reproducible
 ```
+
+This document was written by Fanny and adapted by Koen for the novel simulation framework.
 
 The goal of this document is to evaluate the performance on 10X Genomics scRNA-seq data. We simulate data from a 10X-genomics dataset using the updated simulation framework from zingeR team.
 
@@ -132,8 +134,6 @@ tenXData = counts
 
 ```{r}
 paramsTenx = getDatasetMoMPositive(counts = tenXData)
-
-### PROBLEM: many dispersions are estimated to be negative.
 ```
 
 
@@ -143,7 +143,6 @@ paramsTenx = getDatasetMoMPositive(counts = tenXData)
 Fit between simulated and real dataset is not great, but Koen is working on new simulation framework.
 
 ```{r sims}
-source("zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
 
 nSamples=ncol(tenXData)
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
@@ -156,7 +155,7 @@ simData <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                            dataset = tenXData, nTags = nTags,
                            group = grp,
                            verbose = TRUE, params = paramsTenx,
-                           lib.size = libSizes, cpm="AveLogCPM")
+                           lib.size = libSizes, cpm="AveLogCPM", normalizeLambda=TRUE)
 simData$counts[1:5,1:5]
 ```
 
@@ -387,8 +386,16 @@ core <- SummarizedExperiment(simData$counts,
 
 ```{r zinbcommondisp}
 zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
-save(zinb_c, file = 'zinb-common-disp-fc2.rda')
-load('zinb-common-disp-fc2.rda')
+#save(zinb_c, file = 'zinb-common-disp-fc2.rda')
+#load('zinb-common-disp-fc2.rda')
+
+epsValues = c(1e8, 1e10, 1e12, 1e14)
+name=as.character(c(8, 10,12,14))
+for(i in 1:3){
+  assign(paste0("zinb_c_eps",name[i]), zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=epsValues[i]))
+}
+
+
 ```
 
 ```{r zinbgenewisedisp}
@@ -402,8 +409,9 @@ load('zinb-genewise-disp-fc2.rda')
 counts = simData$counts
 myfct = list(#DESeq2 = DESeq2,
              edgeR = edgeR,
-             limmavoom = limma,
-             MAST = MAST)
+             limmavoom = limma
+             #MAST = MAST
+              )
 
 par(mfrow = c(2,2))
 ylim = c(0, 11)
@@ -419,7 +427,14 @@ res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=yl
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
 
-res[['zingeR_edgeR']] = zingeR_edgeR(counts, grp)
+## add high eps
+res[['ZINB_WaVE_edgeR_common8']]  = zinbwave_edgeR(counts, grp, zinb_c_eps8, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB_WaVE_edgeR_common10']]  = zinbwave_edgeR(counts, grp, zinb_c_eps10, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB_WaVE_edgeR_common12']]  = zinbwave_edgeR(counts, grp, zinb_c_eps12, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB_WaVE_edgeR_common14']]  = zinbwave_edgeR(counts, grp, zinb_c_eps14, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+
+
+
 ```
 
 ```{r}
@@ -432,14 +447,21 @@ for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 Very similar.
 
 ```{r zinbwaveW}
-zingeREdgeRWeights = zingeR::zeroWeightsLS(counts=simData$counts, design=model.matrix(~grp), maxit=250, llTol=1e-1, llOffset=1e-2, verbose=TRUE, plotW=TRUE)
+#zingeREdgeRWeights = zingeR::zeroWeightsLS(counts=simData$counts, design=model.matrix(~grp), maxit=250, llTol=1e-1, llOffset=1e-2, verbose=TRUE, plotW=TRUE)
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
 hist(zinbwave_c_weights[simData$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
 hist(zinbwave_c_weights[simData$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 
-zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
-hist(zinbwave_g_weights[simData$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
-hist(zinbwave_g_weights[simData$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
+
+zinbwave_c_weights_highEps <- computeZinbwaveWeights(zinb_c_highEpsilon, counts)
+hist(zinbwave_c_weights_highEps[simData$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+hist(zinbwave_c_weights_highEps[simData$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
+
+
+
+# zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
+# hist(zinbwave_g_weights[simData$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+# hist(zinbwave_g_weights[simData$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 ```
 
 ```{r tenxWeightsFC2}

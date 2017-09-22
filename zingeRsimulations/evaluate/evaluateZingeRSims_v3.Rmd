@@ -43,7 +43,7 @@ dds_origIslam <- DESeqDataSetFromMatrix(countData = islamCompare[rowsIslam,],
                                                        stringsAsFactors = FALSE),
                                   design = ~ group)
 
-#GSE74596. downloaded from conquer.
+#GSE74596. downloaded from conquer. Parts of code below from Charlotte Soneson.
 pathGSE74596 = "/Users/koenvandenberge/PhD_Data/singleCell/conquer/"
 mae <- readRDS(paste0(pathGSE74596,"GSE74596.rds"))
 mae <- updateObject(mae)
@@ -272,8 +272,8 @@ dds_zingerIslam <- DESeqDataSetFromMatrix(countData = islamSim$counts,
                                     design = ~ group)
 
 countsimQCReport(ddsList=list(original=dds_origIslam,zingeR=dds_zingerIslam),
-                  outputFile="~/islamMoMNewDefaultSim.html",
-                  description = "islam dataset, unnormalized MoM positive, new defaults in simulation", calculateStatistics=FALSE)
+                  outputFile="~/islamMoMNewIterativeSim.html",
+                  description = "21/09/2017: islam dataset, unnormalized MoM positive, new simulation with iterative estimation ", calculateStatistics=FALSE)
 
 ### GSE74596
 paramsGSE = getDatasetMoMPositive(counts=countsGSE)
@@ -320,7 +320,7 @@ trapnellSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
 
 dds_zingerTrapnell <- DESeqDataSetFromMatrix(countData = trapnellSim$counts, colData = data.frame(group = grp, sample = colnames(trapnellSim$counts), row.names = colnames(trapnellSim$counts), stringsAsFactors = FALSE), design = ~ group)
 
-countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellMoMNewDefaultSim.html", description="trapnell dataset, unnormalized Method of Moments on positive counts, new defaults in simulation",
+countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellMoMNewIterativeSim.html", description="21/09/2017: trapnell dataset, Method of Moments on positive counts, new iterative simulation",
 calculateStatistics=FALSE)
 
 ### 10x 4k pbmc dataset.
@@ -340,12 +340,12 @@ tenxSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                           dataset = assays(se)$counts, nTags = nTags,
                           group = grp,
                           verbose = TRUE, params = paramsTenx,
-                          lib.size = libSizes)
+                          lib.size = libSizes, normalizeLambda=TRUE)
 
 
 dds_zingerTenx <- DESeqDataSetFromMatrix(countData = tenxSim$counts, colData = data.frame(grp=grp, sample = colnames(tenxSim$counts), row.names = colnames(tenxSim$counts), stringsAsFactors = FALSE), design = ~ grp)
 
-countsimQCReport(ddsList=list(original=dds_origTenx,zingeR=dds_zingerTenx), outputFile="~/tenxMoMNewDefaultSim.html", description="tenx dataset, normalized Method of Moments on positive counts, new defaults", calculateStatistics=FALSE)
+countsimQCReport(ddsList=list(original=dds_origTenx,zingeR=dds_zingerTenx), outputFile="~/tenxMoMNewIterativeSimNormalizedLambda.html", description="tenx dataset, normalized Method of Moments on positive counts, iterative simulation with normalized lambda", calculateStatistics=FALSE)
 
 
 ```
@@ -437,10 +437,7 @@ for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambd
 disp[disp<0] = 1e-5
 plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
 
-## these are immediately correct. very nice.
-
-
-
+## these are immediately correct.
 
 ### iteratively estimate them on positive counts only
 reEstimateExprFraction4 = function(counts, offset, lambda, phi){
@@ -477,6 +474,135 @@ plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
 plot(x=lambdas[,1], y=lambdaLoop, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
 
 plot(x=phi[,1],y=dispLoop, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+
+###############################################
+############# ZINB SIMULATION #################
+###############################################
+set.seed(77)
+lambdas = matrix(rep(seq(1e-6,4e-6,length=181),each=100),ncol=100, byrow=TRUE)
+phi = matrix(rep(seq(0.01,7,length.out=181),each=100),ncol=100, byrow=TRUE)
+libSize = runif(n=100,min=1e6,max=1.5e6)
+hlpCount = matrix(rnbinom(n=181*100, mu=sweep(lambdas,2,STATS=libSize,FUN="*"), size=1/phi),nrow=181,ncol=100,byrow=FALSE)
+#add zero
+hlpCount[sample(length(hlpCount),3000)] = 0
+
+## lambda
+getExprFraction = function(counts, offset){
+  mean(counts/offset)
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
+
+## dispersion
+getPhiMoM = function(counts, lambda, offset){
+    n=length(counts)
+    mu=lambda*offset
+    phi = (sum(counts^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+
+
+## estimates on positive counts
+## lambda: initially overestimated
+getExprFraction4 = function(counts, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+  sum(countsModel)/sum(offsetModel)
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction4(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
+
+## dispersion: initally underestimated
+getPhiMoM = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+
+### better initial estimates by using empirical zero probability
+getExprFraction4 = function(counts, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    lambda = sum(countsModel)/sum(offsetModel)
+    lambda*(1-mean(counts==0))
+}
+
+lambda = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) lambda[i] = getExprFraction4(counts=hlpCount[i,], offset=libSize)
+plot(x=lambdas[,1], y=lambda, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
+
+getPhiMoM = function(counts, lambda, offset){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2 * (1-mean(counts==0))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+disp = vector(length=nrow(hlpCount))
+for(i in 1:nrow(hlpCount)) disp[i] = getPhiMoM(counts=hlpCount[i,], lambda=lambda[i], offset=libSize)
+disp[disp<0] = 1e-5
+plot(x=phi[,1],y=disp, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+## these are immediately correct.
+
+### iteratively estimate them on positive counts only
+reEstimateExprFraction4 = function(counts, offset, lambda, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+  sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
+}
+
+reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
+
+lambdaLoop=lambda
+dispLoop=disp
+par(mfrow=c(1,2))
+plot(x=lambdas[,1], y=lambdaLoop) ; abline(0,1,col=2)
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
+for(k in 1:30){
+  for(i in 1:nrow(hlpCount)) lambdaLoop[i] = reEstimateExprFraction4(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize, phi=dispLoop[i])
+plot(x=lambdas[,1], y=lambdaLoop) ; abline(0,1,col=2)
+
+  for(i in 1:nrow(hlpCount)) dispLoop[i] = reEstimatePhiMoM4(counts=hlpCount[i,], lambda=lambdaLoop[i], offset=libSize, phi=dispLoop[i])
+dispLoop[dispLoop<0]=1e-5
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9)) ; abline(0,1,col=2)
+
+  Sys.sleep(1) #wait a second to see evolution of estimates.
+}
+
+plot(x=lambdas[,1], y=lambdaLoop, xlab="simulated lambda", ylab="estimated lambda") ; abline(0,1,col=2)
+
+plot(x=phi[,1],y=dispLoop, ylim=c(0,9), xlab="simulated dispersion", ylab="estimated dispersion") ; abline(0,1,col=2)
+
+#one-step approach only works for NB, but not for ZINB. This is because you classify all zeros in the biological component autmoatically with the one-step procedure.
+
 
 
 ```

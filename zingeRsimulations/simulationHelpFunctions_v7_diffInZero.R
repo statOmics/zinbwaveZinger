@@ -239,50 +239,50 @@ library(gamlss.tr)
 # }
 
 
-# getExprFraction4 = function(counts, offset){
-#     countsModel = counts[counts>0]
-#     offsetModel = offset[counts>0]
-#   sum(countsModel)/sum(offsetModel)
-# }
-
 getExprFraction4 = function(counts, offset){
     countsModel = counts[counts>0]
     offsetModel = offset[counts>0]
-    lambda = sum(countsModel)/sum(offsetModel)
-    lambda*(1-mean(counts==0))
+  sum(countsModel)/sum(offsetModel)
 }
 
-# getPhiMoMPositive4 = function(counts, lambda, offset){
+# getExprFraction4 = function(counts, offset){
 #     countsModel = counts[counts>0]
 #     offsetModel = offset[counts>0]
-#     mu=lambda*offsetModel
-#     phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
-#     return(phi)
+#     lambda = sum(countsModel)/sum(offsetModel)
+#     lambda*(1-mean(counts==0))
 # }
 
 getPhiMoMPositive4 = function(counts, lambda, offset){
     countsModel = counts[counts>0]
     offsetModel = offset[counts>0]
     mu=lambda*offsetModel
-    phi = (sum(countsModel^2 * (1-mean(counts==0))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
     return(phi)
 }
 
-
-# reEstimateExprFraction4 = function(counts, offset, lambda, phi){
+# getPhiMoMPositive4 = function(counts, lambda, offset){
 #     countsModel = counts[counts>0]
 #     offsetModel = offset[counts>0]
 #     mu=lambda*offsetModel
-#   sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
-# }
-#
-# reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
-#     countsModel = counts[counts>0]
-#     offsetModel = offset[counts>0]
-#     mu=lambda*offsetModel
-#     phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+#     phi = (sum(countsModel^2 * (1-mean(counts==0))) - sum(mu^2) - sum(mu)) / sum(mu^2)
 #     return(phi)
 # }
+
+
+reEstimateExprFraction4 = function(counts, offset, lambda, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+  sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
+}
+
+reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
+    countsModel = counts[counts>0]
+    offsetModel = offset[counts>0]
+    mu=lambda*offsetModel
+    phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
+    return(phi)
+}
 
 
 
@@ -298,16 +298,15 @@ getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "
   lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction4(counts=x, offset=colSums(dFiltered$counts)))
   dispMoM = vector(length=nrow(dFiltered$counts))
   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
-  dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion
+  dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
 
   ### old code: iteratively estimating
-  #dispMoM[dispMoM<0] = 1
-#   for(j in 1:MoMIter){
-#   for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
-#   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
-# hist(dispMoM) ; message(paste("mean below zero",mean(dispMoM<0)))
-#   if(j < MoMIter) dispMoM[dispMoM<0] = 1 #except for last iteration
-#   }
+   for(j in 1:MoMIter){
+    message(paste0("iteration ",j," in ",MoMIter))
+   for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
+   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
+  dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
+   }
   ### end old code
 
   ## assume convergence
@@ -461,16 +460,26 @@ NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group)
     #zeroProbMat = matrix(predict(zeroFit, newdata=data.frame(logLibHlp=libPredict, midsHlp=cpmPredict), type="response"), byrow=FALSE, ncol=nlibs)
 
     ## simulate negative binomial counts
+    # mu=sweep(Lambda,2,lib.size,"*")
+    # mu[mu<0.1] = 0.1
+    # #adjustment = zeroProbMat*mu
+    # #mu=mu+adjustment
+    # counts = matrix(rnbinom(n=nTags*nlibs, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
+    # zeroProbNegBin = matrix(dnbinom(0, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
+    # expectedZeroProbablityNegBinomial = rowMeans(zeroProbNegBin)
+
+    ## simulate negative binomial counts
     mu=sweep(Lambda,2,lib.size,"*")
-    mu[mu<0.1] = 0.1
-    #adjustment = zeroProbMat*mu
-    #mu=mu+adjustment
-    counts = matrix(rnbinom(n=nTags*nlibs, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
     zeroProbNegBin = matrix(dnbinom(0, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
     expectedZeroProbablityNegBinomial = rowMeans(zeroProbNegBin)
+    dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat)
+    adjustment = zeroProbMat*mu
+    mu[dropoutGenes,]=mu[dropoutGenes,]+adjustment[dropoutGenes,]
+    mu[mu<0.1] = 0.1
+    counts = matrix(rnbinom(n=nTags*nlibs, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
 
     ## calculate dropouts
-    dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat) 
+    dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat)
     message(paste0("Adding extra zeros w.r.t. NB for ",sum(dropoutGenes)," genes"))
     #dropout matrix is 0 for dropout.
     dropoutMatrix = 1-matrix(rbinom(n=nTags*nlibs, size=1, prob=zeroProbMat), nrow=nTags, ncol=nlibs, byrow=FALSE)
