@@ -1,5 +1,5 @@
 ---
-title: "Case study on neuronal cells - FPR on mocks"
+title: "Evaluate FPR on 10x Genomics PBMC dataset"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
 output: 
@@ -18,9 +18,7 @@ library(edgeR)
 library(limma)
 library(zingeR)
 library(zinbwave)
-
 library(genefilter)
-
 library(BiocParallel)
 library(doParallel)
 library(Biobase)
@@ -33,11 +31,9 @@ registerDoParallel(NCORES)
 register(DoparParam())
 ```
 
-The goal of this document is to compare the FPR between zinbwave-DE, zingeR-DE, and other DE methods on mock communities. I'll first try to reproduce Figure 5 from zingeR preprint, but with 10x-genomics data 3k PMBCs.
+The goal of this document is to evaluate the FPR of our method and compare it to the FPR of other methods (edgeR, DESeq2, limmavoom, MAST, scde) on 10x-genomics data 3k PMBCs.
 
 # Functions
-
-Code for rna-seq and zinger rna-seq functions are adapted from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
 
 ```{r sourceEdgeR}
 runEdgeR <- function(e) {
@@ -188,7 +184,7 @@ runZinbwaveEdgeR <- function(e){
   design <- model.matrix(~ condition)
   # compute zinbwave weights
   library(zinbwave)
-  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeZinbwaveWeights(zinb, exprs(e))
   # use zingeR-edgeR
   d <- DGEList(exprs(e))
@@ -208,7 +204,7 @@ runZinbwaveDESeq2 <- function(e){
   design <- model.matrix(~ condition)
   # compute zinbwave weights
   library(zinbwave)
-  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeZinbwaveWeights(zinb, exprs(e))
   # use zingeR-DESeq2
   dse <- DESeqDataSetFromMatrix(exprs(e),
@@ -233,7 +229,7 @@ runMAST <- function(e){
   tpm <- log2(tpm+1)
   sca <- FromMatrix(tpm,cData=data.frame(group=pData(e)$condition))
   
-  # Adaptive thresholding from MAST vignette
+  # Adaptive thresholding from MAST vignette for MAIT analysis
   freq_expressed <- 0.2
   thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300,
                                      conditions = pData(e)$condition)
@@ -279,11 +275,53 @@ runVoom <- function(e) {
 }
 ```
 
+```{r}
+runDESeq2 <- function(e, retDDS=FALSE) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e), DataFrame(pData(e)), ~ condition)
+  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE)
+  res <- results(dds)
+  beta <- res$log2FoldChange
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=NA)
+}
+```
+
+```{r scde}
+runSCDE <- function(e){
+  require(scde)
+  # calculate models
+  counts = exprs(e)
+  rownames(counts) = fData(e)[,1]
+  o.ifm <- scde.error.models(counts = counts, groups = pData(e)$condition, n.cores = 1,
+                             threshold.segmentation = TRUE,
+                             save.crossfit.plots = FALSE, 
+                             save.model.plots = FALSE, verbose = 0)
+  
+  # estimate gene expression prior
+  o.prior <- scde.expression.prior(models = o.ifm, counts = exprs(e), length.out = 400, show.plot = FALSE)
+  # run differential expression tests on all genes.
+  ediff <- scde.expression.difference(o.ifm, exprs(e), o.prior, 
+                                      groups  =  pData(e)$condition,
+                                      n.randomizations  =  100,
+                                      n.cores  =  2, verbose  =  0,
+                                    batch=factor(pData(e)$pickingSession))
+  pvals=(1-pnorm(abs(ediff$Z)))*2
+  padj=p.adjust(pvals,method="BH")
+  list(pvals=pvals,padj=padj,logfc=NA)
+}
+```
+
+
 # Data
+
 ```{r data}
 load('../tenx/pbmc3k/our_version/core.rda')
 core
-ncells = 50
+ncells = 45
 nreps = 10
 
 subsets = sapply(1:nreps, function(i){
@@ -301,19 +339,20 @@ subsets = as.data.frame(t(subsets))
 
 # Results
 
-We remove genes with only zeros. It seems that edgeR and zingeR-edgeR don't need to remove these genes. What are the pvalues for these genes?
-
 ```{r res}
-algos <- list("DESeq2_poscounts"= runDESeq2_poscounts,
-              "zingeR-DESeq2"   = runDESeq2Zero,
-              "zinbwave-DESeq2" = runZinbwaveDESeq2,
+algos <- list("DESeq2"          = runDESeq2,
+              "DESeq2_poscounts"= runDESeq2_poscounts,
+              "DESeq2-zingeR"   = runDESeq2Zero,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "edgeR"           = runEdgeR,
-              "zingeR-edgeR"    = runEdgeREMLibSize,
-              "zinbwave-edgeR"  = runZinbwaveEdgeR,
+              "edgeR-zingeR"    = runEdgeREMLibSize,
+              "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
-              "MAST"            = runMAST)
+              "MAST"            = runMAST,
+              "scde"            = runSCDE)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
+nreps <- 1
 ```
 
 ```{r,eval=FALSE}
@@ -323,8 +362,9 @@ res <- lapply(1:nreps, function(i) {
     eLoop <- eset[,as.numeric(subsets[i,])]
     ngenes = sum(rowSums(exprs(eLoop) > 0) < 5)
     cat(sprintf("Removing %s genes with only 0's", ngenes))
+    # remove genes with too many zeros
     eLoop <- eLoop[rowSums(exprs(eLoop) > 0) > 4, ]
-    condition = factor(rep(c("A", "B"), each = 50))
+    condition = factor(rep(c("A", "B"), each = 45))
     pData(eLoop)$condition = condition
     resFPR <- lapply(namesAlgos, function(n){
       print(n)
@@ -344,7 +384,7 @@ res <- lapply(1:nreps, function(i) {
 ```
 
 ## Boxplots
-```{r mocksBoxplot}
+```{r fpr10x}
 hlp=lapply(res,function(replication){
   lapply(replication,function(method){
     pval=method$pvals
@@ -358,7 +398,11 @@ fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
 rownames(fprHat)=namesAlgos
 
 boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
-ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
+```
+
+```{r}
+ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
+       aes(x=reorder(method,fpr,median),y=fpr)) +
   geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
     geom_point(position = position_jitter(w = 0.1, h = 0),
                color="grey50", size=1) +
@@ -368,15 +412,19 @@ ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
 ```
 
 ## Histograms of pvalues
-```{r mocksPvalues}
-k=1
-par(mfrow=c(3,3))
-hh <- sapply(1:length(res[[k]]), function(i){
-  hist(res[[k]][[i]]$pvals, main=names(algos)[i], xlab="",
+```{r fpr10xPval}
+keep = !grepl('zingeR', names(res[[1]]))
+idx = 1:length(res[[1]])
+idx = idx[keep]
+par(mfrow=c(2,3))
+hh <- sapply(idx, function(i){
+  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="",
        breaks=seq(0,1,by=0.05)) 
 })
 par(mfrow=c(1,1))
 ```
 
-
-
+# sessionInfo
+```{r}
+sessionInfo()
+```

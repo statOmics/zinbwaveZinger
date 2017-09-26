@@ -1,5 +1,5 @@
 ---
-title: "Case study on neuronal cells - FPR on mocks"
+title: "FPR - Usoskin dataset"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
 output: 
@@ -18,37 +18,127 @@ library(edgeR)
 library(limma)
 library(zingeR)
 library(zinbwave)
-
 library(genefilter)
-
 library(BiocParallel)
 library(doParallel)
 library(Biobase)
 library(ggplot2)
 ```
 
-```{r}
-NCORES <- 2
-registerDoParallel(NCORES)
-register(DoparParam())
-```
-
-The goal of this document is to compare the FPR between zinbwave-DE, zingeR-DE, and other DE methods on mock communities. I'll first try to reproduce Figure 5 from zingeR preprint.
+The goal of this document is to evaluate the FPR of our method and compare it to the FPR of other methods (edgeR, DESeq2, limmavoom, MAST, scde). 
 
 # Data
 ```{r data}
-path = '~/Documents/scRNAseq/gitrepo/zingeRPaper/singleCellPaper/case/'
+path = '../usoskin/data/'
 load(paste0(path, 'esetUsoskin.RData'))
 eset=eset[rowSums(exprs(eset)>0)>=20,]
 exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
 
-file = paste0(path, "fpr/subsetMatrixUsoskinFPR_randomCellTypes.txt")
+file = paste0(path, "subsetMatrixUsoskinFPR_randomCellTypes.txt")
 subsets <- read.table(file)
 ```
 
-# Functions
+# Batch
+```{r batchUsoskin}
+pickingSession = factor(pData(eset)[, 'Picking sessions'])
+usoskin = exprs(eset)
+expit <- function(x) 1/(1+exp(-x))
+logLib = log(colSums(usoskin))
+pZero = colMeans(usoskin == 0)
+plot(x = logLib, y = pZero, xlab = "Log library size", ylab = "Fraction of zero's",
+     main = "", cex.lab = 2, cex.main = 2, bty = "l", pch = 1, cex.axis = 1.5,
+     col = as.numeric(pickingSession))
+m = glm(pZero ~ logLib, family = "binomial")
+a = coef(m)[1]
+b = coef(m)[2]
+lines(x = sort(logLib),
+      y = expit(a + b * sort(logLib)), lwd = 2, col = "steelblue")
+m2 = glm(pZero ~ logLib + pickingSession, family = "binomial")
+a = coef(m2)[1]
+b = coef(m2)[2]
+lines(x = sort(logLib[pickingSession == "Cold"]),
+      y = expit(a + b * sort(logLib[pickingSession == "Cold"])), lwd = 2, col = 1)
+a = coef(m2)[1] + coef(m2)[3]
+b = coef(m2)[2]
+lines(x = sort(logLib[pickingSession == "RT-1"]), 
+      y = expit(a + b * sort(logLib[pickingSession == "RT-1"])), col = 2, lwd = 2)
+a = coef(m2)[1] + coef(m2)[4]
+lines(x = sort(logLib[pickingSession == "RT-2"]),
+      y = expit(a + b * sort(logLib[pickingSession == "RT-2"])), col = 3, lwd = 2)
+legend("bottomleft", c("Global", "Cold", "RT-1", "RT-2"),
+       col = c("steelblue", 1:3), lty = 1, cex = 1.5)
+mtext("b", at = 4, font = 2, cex = 4/3)
+```
 
-Code for rna-seq and zinger rna-seq functions are adapted from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
+# Posterior probabilities of the ZINB-WaVE model
+
+```{r}
+cData = pData(eset)[,c('Level 3', 'Picking sessions')]
+colnames(cData) = c('Level3', 'Pickingsessions')
+se = SingleCellExperiment(assays = list(counts = exprs(eset)),
+                          colData = cData)
+colData(se)$Pickingsessions = factor(colData(se)$Pickingsessions)
+colData(se)$Level3 = factor(colData(se)$Level3)
+```
+
+```{r,eval=FALSE}
+library(zinbwave)
+library(doParallel)
+library(BiocParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+set.seed(8492)
+
+print(system.time(zinb_batch <- zinbFit(se, X = '~ Pickingsessions + Level3')))
+fn = 'zinb_batch.rda'
+save(zinb_batch, file = fn)
+
+print(system.time(zinb_nobatch <- zinbFit(se, X = '~ Level3')))
+fn = 'zinb_nobatch.rda'
+save(zinb_nobatch, file = fn)
+```
+
+```{r}
+computeObservationalWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+```
+
+```{r}
+load('zinb_nobatch.rda')
+weights_nobatch = computeObservationalWeights(zinb_nobatch, assay(se))
+load('zinb_batch.rda')
+weights_batch = computeObservationalWeights(zinb_batch, assay(se))
+```
+
+```{r histWeightsUsoskin}
+ylim = c(0, 3e6)
+hist(weights_batch[assay(se) == 0], main = "", cex.lab = 2,
+     xlab = "Posterior probability", cex.axis = 2, ylim=ylim)
+hist(weights_nobatch[assay(se) == 0], add = TRUE, ylim=ylim,
+     col = rgb(0.1, 0.8, 0.1, .2))
+legend("topright", c("picking session + eff. lib. size",
+                    "eff. lib. size"),
+       fill = c(0, rgb(0.1, 0.8, 0.1, .2)), bty = "n", cex = 1.25)
+mtext("c", at = -.25, font = 2, cex = 4/3)
+```
+```{r qqplotWeightsBatch}
+qqplot(weights_batch[assay(se) == 0], weights_nobatch[assay(se) == 0],
+       type = 'l', xlab='Posterior Probabilities - Batch', main = 'QQplot',
+       ylab='Posterior Probabilities - No Batch')
+abline(a=0,b=1,col='gray')
+```
+
+
+# Functions
 
 ```{r sourceEdgeR}
 runEdgeR <- function(e) {
@@ -186,25 +276,14 @@ runDESeq2Zero <- function(e){
 ```
 
 ```{r zinbwaveEdgeR}
-computeZinbwaveWeights <- function(zinb, counts){
-  mu <- getMu(zinb)
-  pi <- getPi(zinb)
-  theta <- getTheta(zinb)
-  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
-  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
-  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
-  t(zinbwg)
-}
-
 runZinbwaveEdgeR <- function(e){
   condition = pData(e)$condition
   pickingSession = pData(e)$pickingSession
   design <- model.matrix(~ condition + pickingSession)
   # compute zinbwave weights
   library(zinbwave)
-  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
-  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
+  weights <- computeObservationalWeights(zinb, exprs(e))
   # use zingeR-edgeR
   d <- DGEList(exprs(e))
   d <- edgeR::calcNormFactors(d)
@@ -224,8 +303,8 @@ runZinbwaveDESeq2 <- function(e){
   design <- model.matrix(~ condition + pickingSession)
   # compute zinbwave weights
   library(zinbwave)
-  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e8)
-  weights <- computeZinbwaveWeights(zinb, exprs(e))
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
+  weights <- computeObservationalWeights(zinb, exprs(e))
   # use zingeR-DESeq2
   dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
                                 design=~ condition + pickingSession)
@@ -297,29 +376,72 @@ runVoom <- function(e) {
 }
 ```
 
+```{r}
+runDESeq2 <- function(e, retDDS=FALSE) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e), DataFrame(pData(e)), ~ condition)
+  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE)
+  res <- results(dds)
+  beta <- res$log2FoldChange
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=NA)
+}
+```
+
+```{r scde}
+runSCDE <- function(e){
+  require(scde)
+  # calculate models
+  counts = exprs(e)
+  rownames(counts) = fData(e)[,1]
+  o.ifm <- scde.error.models(counts = counts, groups = pData(e)$condition, n.cores = 1,
+                             threshold.segmentation = TRUE,
+                             save.crossfit.plots = FALSE, 
+                             save.model.plots = FALSE, verbose = 0)
+  
+  # estimate gene expression prior
+  o.prior <- scde.expression.prior(models = o.ifm, counts = exprs(e), length.out = 400, show.plot = FALSE)
+  # run differential expression tests on all genes.
+  ediff <- scde.expression.difference(o.ifm, exprs(e), o.prior, 
+                                      groups  =  pData(e)$condition,
+                                      n.randomizations  =  100,
+                                      n.cores  =  2, verbose  =  0,
+                                    batch=factor(pData(e)$pickingSession))
+  pvals=(1-pnorm(abs(ediff$Z)))*2
+  padj=p.adjust(pvals,method="BH")
+  list(pvals=pvals,padj=padj,logfc=NA)
+}
+```
+
+
 # Results
 
-We remove genes with only zeros. It seems that edgeR and zingeR-edgeR don't need to remove these genes. What are the pvalues for these genes?
-
-## Boxplots
 ```{r res}
-algos <- list("DESeq2_poscounts"= runDESeq2_poscounts,
-              "zingeR-DESeq2"   = runDESeq2Zero,
-              "zinbwave-DESeq2" = runZinbwaveDESeq2,
+algos <- list("DESeq2"          = runDESeq2,
+              "DESeq2_poscounts"= runDESeq2_poscounts,
+              "DESeq2-zingeR"   = runDESeq2Zero,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "edgeR"           = runEdgeR,
-              "zingeR-edgeR"    = runEdgeREMLibSize,
-              "zinbwave-edgeR"  = runZinbwaveEdgeR,
+              "edgeR-zingeR"    = runEdgeREMLibSize,
+              "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
               "MAST"            = runMAST)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
-nreps <- 10
+nreps <- 1
 ```
 
 ```{r,eval=FALSE}
-res <- lapply(7:nreps, function(i) {
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+res <- lapply(1:nreps, function(i) {
     cat(i," ")
     eLoop <- eset[,as.numeric(subsets[i,])]
+    # We remove genes with only zeros as zinbwave needs to remove these genes
     cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
     eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
     condition=factor(rep(c("A","B"),each=45))
@@ -343,8 +465,9 @@ res <- lapply(1:nreps, function(i) {
 })
 ```
 
+## Boxplots
 
-```{r mocksBoxplot}
+```{r fprUsoskin}
 hlp=lapply(res,function(replication){
   lapply(replication,function(method){
     pval=method$pvals
@@ -358,7 +481,11 @@ fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
 rownames(fprHat)=namesAlgos
 
 boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
-ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
+```
+
+```{r}
+ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
+       aes(x=reorder(method,fpr,median),y=fpr)) +
   geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
     geom_point(position = position_jitter(w = 0.1, h = 0),
                color="grey50", size=1) +
@@ -368,15 +495,19 @@ ggplot(boxplotData,aes(x=reorder(method,fpr,median),y=fpr)) +
 ```
 
 ## Histograms of pvalues
-```{r mocksPvalues}
+```{r fprUsoskinPval}
+keep = !grepl('zingeR', names(res[[1]]))
+idx = 1:length(res[[1]])
+idx = idx[keep]
 par(mfrow=c(3,3))
-hh <- sapply(1:length(res[[1]]), function(i){
+hh <- sapply(idx, function(i){
   hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="",
        breaks=seq(0,1,by=0.05)) 
 })
 par(mfrow=c(1,1))
 ```
 
-
-
-
+# sessionInfo
+```{r}
+sessionInfo()
+```

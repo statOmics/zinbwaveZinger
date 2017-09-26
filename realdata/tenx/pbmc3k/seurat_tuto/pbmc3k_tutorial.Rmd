@@ -323,3 +323,8 @@ The memory/naive split is bit weak, and we would probably benefit from looking a
 pbmc <- SetAllIdent(object = pbmc, id = "ClusterNames_0.6")
 save(pbmc, file = "pbmc3k_final.Rda")
 ```
+
+# sessionInfo
+```{r}
+sessionInfo()
+```

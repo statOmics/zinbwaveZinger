@@ -1,0 +1,247 @@
+---
+title: "Compare DE methods for 10X genomics - edgeR and us"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(edgeR)
+library(zingeR)
+library(RColorBrewer)
+library(Rtsne)
+library(ggplot2)
+```
+
+After running Seurat preprocessing (filtering, normalization, dimensionality reduction, clustering), we want to find DE genes between clusters using Seurat DE tool, edgeR, edgeR with our weights. Then, we'll perform gene enrichment analysis.
+
+```{r loadobject}
+load("../core.rda")
+core = core[rowSums(assay(core)) > 0, ]
+core
+colData(core)$seurat = factor(colData(core)$seurat)
+```
+
+Select only genes used for Seurat clustering
+```{r}
+core = core[rowData(core)$seuratVarGenes, ]
+dim(core)
+```
+
+```{r}
+library(doParallel)
+library(BiocParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+
+kvec = c(0, 2, 4, 5, 10, 25)
+if (FALSE){
+  for (k in kvec){
+    print(k)
+    print(system.time(zinb <- zinbFit(core, epsilon = 1e4, K = k)))
+    fn = sprintf('zinb_k%s.rda', k)
+    save(zinb, file = fn)
+  }
+}
+
+# compute aic, bic 
+# these functions should be available in zinbwave package soon
+zinbAIC <- function(model, x) {
+  if ((nSamples(model) != nrow(x))|(nFeatures(model) != ncol(x))) {
+    stop("x and model should have the same dimensions!")
+  }
+  k <- nParams(model)
+  ll <- loglik(model, x)
+  return(2*k - 2*ll)
+}
+
+zinbBIC <- function(model, x) {
+  n <- nSamples(model)
+  if ((n != nrow(x))|(nFeatures(model) != ncol(x))) {
+    stop("x and model should have the same dimensions!")
+  }
+  k <- nParams(model)
+  ll <- loglik(model, x)
+  return(log(n)*k - 2*ll)
+}
+
+res = sapply(kvec, function(k){
+  fn = sprintf('zinb_k%s.rda', k)
+  load(fn)
+  aic = zinbAIC(zinb, t(assay(core)))
+  bic = zinbBIC(zinb, t(assay(core)))
+  c(aic = aic, bic = bic)
+})
+
+par(mfrow=c(1,2))
+plot(kvec, res['aic', ], type = 'o', main = 'AIC', xlab = 'K', ylab = 'AIC')
+plot(kvec, res['bic', ], type = 'o', main = 'BIC', xlab = 'K', ylab = 'BIC')
+par(mfrow=c(1,1))
+```
+
+From the previous plots, we decide to use K = 5.
+
+```{r}
+load('zinb_k5.rda')
+```
+
+Colors are from the Usoskin et al. paper from seurat labels.
+```{r}
+W = getW(zinb)
+w_tsne <- Rtsne(W, pca = FALSE)
+pairs(W, col=colData(core)$seurat)
+plot(w_tsne$Y, pch = 19, col = colData(core)$seurat)
+legend('bottomright', legend = unique(colData(core)$seurat), 
+       fill = unique(colData(core)$seurat), cex = 0.5)
+```
+
+## PCA
+
+Let's check what we get when performing pca. We take the same number of dimensions as in zinbwave.
+
+```{r}
+norm10x = function (ei){
+  sums = colSums(ei)
+  eo = t(t(ei)*median(sums)/sums)
+  return(eo)
+}
+
+fastpca <- function(expr, scale=FALSE, k = 50) {
+  library(rARPACK)
+  svd_raw <- svds(scale(t(expr), center=TRUE, scale=scale),
+                  k=k, nu=k, nv=0)
+  pc_raw <- svd_raw$u %*% diag(svd_raw$d[1:k])
+  return(pc_raw)
+}
+```
+
+```{r}
+tc <- norm10x(assay(core)) 
+pc_tc <- fastpca(log1p(tc), k = 5)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col= colData(core)$seurat, 
+     main = 'PCA, k = 5')
+legend('bottomright', legend = unique(colData(core)$seurat), 
+       fill = unique(colData(core)$seurat), cex = 0.5)
+```
+
+```{r}
+pc_tc <- fastpca(log1p(tc), k = 10)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col= colData(core)$seurat, 
+     main = 'PCA, k = 10')
+legend('bottomright', legend = unique(colData(core)$seurat), 
+       fill = unique(colData(core)$seurat), cex = 0.5)
+```
+
+```{r}
+pc_tc <- fastpca(log1p(tc), k = 50)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col= colData(core)$seurat, 
+     main = 'PCA, k = 50')
+legend('bottomright', legend = unique(colData(core)$seurat), 
+       fill = unique(colData(core)$seurat), cex = 0.5)
+```
+
+
+# Clustering
+
+We perform clustering on W.
+
+```{r}
+library(clusterExperiment)
+NCORES=2
+sese <- SummarizedExperiment(t(W), colData = colData(core))
+print(system.time(ce <- RSEC(sese, k0s = 2:4, alphas = c(0.1),
+                             betas = 0.8, dimReduce="none",
+                             clusterFunction = "hierarchical01",
+                             minSizes=1,
+                             ncores = NCORES, isCount=FALSE,
+                             dendroReduce="none",dendroNDims=NA,
+                             subsampleArgs = list(resamp.num=100, clusterFunction="kmeans", clusterArgs=list(nstart=10)),
+                             verbose=TRUE,
+                             combineProportion = 0.2,
+                             mergeMethod = "none", random.seed=424242,
+                             combineMinSize = 10)))
+save(ce, file = 'ce.rda')
+```
+
+```{r}
+library(clusterExperiment)
+load('ce.rda')
+```
+
+```{r examineCombineMany, fig.cap="RSEC: Candidate clusterings found using the function RSEC from the clusterExperiment package."}
+plotClusters(ce, colPalette = c(bigPalette, rainbow(199)))
+```
+
+```{r plotcoclust, fig.cap="RSEC: Heatmap of co-clustering matrix."}
+plotCoClustering(ce)
+```
+
+```{r tableclust}
+table(primaryClusterNamed(ce), colData(core)$seurat)
+```
+
+```{r barplotOurs, fig.cap="RSEC: Barplot of number of cells per cluster for our workflow's RSEC clustering."}
+plotBarplot(ce, legend = FALSE) 
+```
+
+```{r addPublishedClusters, fig.cap="RSEC: Barplot of number of cells per cluster, for our workflow's RSEC clustering, color-coded by original published clustering."}
+ce <- addClusters(ce, factor(colData(ce)$seurat), clusterLabel = "seurat")
+
+## change default color to match with Figure 7
+clusterLegend(ce)$seurat[, "color"] <- 
+  pal[clusterLegend(ce)$seurat[, "name"]]
+
+plotBarplot(ce, whichClusters=c("combineMany","seurat"),
+            xlab = "", legend = FALSE)
+```
+ 
+```{r}
+table(colData(ce)$seurat, primaryClusterNamed(ce))
+```
+
+```{r heatmapsClusters, fig.cap="RSEC: Heatmap of the normalized expression measures for the 1,000 most variable genes, where rows correspond to genes and columns to cells ordered by RSEC clusters."}
+# Set colors for cell clusterings
+colData(ce)$seurat <- as.factor(colData(ce)$seurat)
+origClusterColors <- pal
+batchColors <- bigPalette[1:nlevels(colData(ce)$Pickingsessions)]
+metaColors <- list("Pickingsessions" = batchColors,
+                   "seurat" = origClusterColors)
+plotHeatmap(ce, visualizeData = log1p(tc),
+            whichClusters = "primary", clusterFeaturesData = "all",
+            clusterSamplesData = "dendrogramValue", breaks = 0.99,
+            sampleData = c("seurat", "Pickingsessions"),
+            clusterLegend = metaColors, annLegend = FALSE, main = "")
+```
+
+```{r}
+newClusters = primaryClusterNamed(ce)
+newPalDf <- ce@clusterLegend[[1]]
+newPal <- newPalDf[, "color"]
+names(newPal) <- newPalDf[, "name"]
+newPal["-1"] = "transparent"
+par(mfrow = c(1,2))
+plot(w_tsne$Y, pch = 19, col = pal[colData(core)$seurat])
+legend('bottomright', legend = unique(colData(core)$seurat), 
+       fill = unique(pal[colData(core)$seurat]), cex = 0.5)
+plot(w_tsne$Y, pch = 19, col = newPal[newClusters])
+legend('bottomright', legend = names(newPal), fill = newPal, cex = 0.5)
+par(mfrow = c(1,1))
+```
+
+```{r}
+colData(se)$ourClusters = newClusters
+save(se, file = 'seAfterClustering.rda')
+```
+

@@ -13,7 +13,7 @@ toc_float: yes
 
 ```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
-library(seurat)
+library(Seurat)
 ```
 
 We applied different methods to find a set of DE genes: edgeR, DESeq2, zinbwave-edgeR, zinbwave-DESeq2, MAST, limmavoom, Seurat. We now want to look at the DE genes to make sure we indeed identify DE genes between memory CD4+ T cells and naive CD4+ T cells.
@@ -23,18 +23,18 @@ load('pbmc3k_subCD4.rda')
 ```
 
 ```{r}
-VlnPlot(object = pbmc, features.plot = c("MS4A1", "CD79A"))
+VlnPlot(object = pbmc, features.plot = c("S100A4", "CCR7", "SH3BGRL3", "GAPDH"), ident.include=0:1)
 ```
 
 ```{r}
-VlnPlot(object = pbmc, features.plot = c("NKG7", "PF4"), use.raw = TRUE, y.log = TRUE)
+VlnPlot(object = pbmc, features.plot = c("S100A4", "CCR7", "SH3BGRL3", "GAPDH"), use.raw = TRUE, y.log = TRUE, ident.include = 0:1)
 ```
 
 ```{r}
-FeaturePlot(object = pbmc, features.plot = c("MS4A1", "GNLY", "CD3E", "CD14", 
-    "FCER1A", "FCGR3A", "LYZ", "PPBP", "CD8A"), cols.use = c("grey", "blue"), 
+FeaturePlot(object = pbmc, features.plot = c("S100A4", "CCR7", "SH3BGRL3", "GAPDH"), cols.use = c("green", "blue"), 
     reduction.use = "tsne")
 ```
+
 
 ```{r}
 top10 <- pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_diff)

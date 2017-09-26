@@ -1,0 +1,268 @@
+---
+title: "Clustering using ZINB-WaVE - Usoskin dataset"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(Rtsne)
+set.seed(8283)
+```
+
+```{r}
+library(doParallel)
+library(BiocParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to perform dimensionality reduction (ZINB-WaVE), clustering (kmeans or clusterExperiment), DE analysis between found clusters (zinbwave-zingeR method). We then want to compare the DE genes with DE genes found in Usoskin paper.
+
+# Data
+```{r data}
+# esetUsoskin.RData obtained by running https://github.com/statOmics/zingeRPaper/blob/master/singleCellPaper/case/usoskinPreprocess.R
+load('data/esetUsoskin.RData')
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset)[1:5,1:5] # raw counts
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+```
+
+Convert ExpressionSet to SingleCellExperiment
+```{r}
+cData = pData(eset)
+colnames(cData) = gsub(' ', '', colnames(cData))
+se = SingleCellExperiment(assays = list(counts = exprs(eset)),
+                          colData = cData,
+                          rowData = fData(eset))
+se
+colData(se)$Pickingsessions = factor(colData(se)$Pickingsessions)
+pal <- clusterExperiment::bigPalette
+colData(se)$Level3 <- as.vector(colData(se)$Level3)
+pal = pal[1:length(unique(colData(se)$Level3))]
+names(pal) = unique(colData(se)$Level3)
+```
+
+# Dimensionality reduction
+
+We keep only the 1,000 most variable genes to cluster the cells.
+```{r}
+library(matrixStats)
+vars <- rowVars(log1p(assay(se)))
+names(vars) <- rownames(se)
+vars <- sort(vars, decreasing = TRUE)
+vargenes <- names(vars)[1:1000]
+plot(vars, main = 'Genewise standard deviation for log counts')
+abline(v = 1000, col = 'red')
+se <- se[vargenes,]
+```
+
+## ZINB-WaVE
+```{r}
+kvec = c(0, 2, 4, 6, 8, 10, 20, 30, 40, 50)
+if (FALSE){
+  for (k in kvec){
+    print(k)
+    print(system.time(zinb <- zinbFit(se, X = '~ Pickingsessions',
+                                      epsilon = 1e4, K = k)))
+    fn = sprintf('zinb_k%s_g1000.rda', k)
+    save(zinb, file = fn)
+  }
+}
+
+# compute aic, bic 
+# these functions should be available in zinbwave package soon
+zinbAIC <- function(model, x) {
+  if ((nSamples(model) != nrow(x))|(nFeatures(model) != ncol(x))) {
+    stop("x and model should have the same dimensions!")
+  }
+  k <- nParams(model)
+  ll <- loglik(model, x)
+  return(2*k - 2*ll)
+}
+
+zinbBIC <- function(model, x) {
+  n <- nSamples(model)
+  if ((n != nrow(x))|(nFeatures(model) != ncol(x))) {
+    stop("x and model should have the same dimensions!")
+  }
+  k <- nParams(model)
+  ll <- loglik(model, x)
+  return(log(n)*k - 2*ll)
+}
+
+res = sapply(kvec, function(k){
+  fn = sprintf('zinb_k%s_g1000.rda', k)
+  load(fn)
+  aic = zinbAIC(zinb, t(assay(se)))
+  bic = zinbBIC(zinb, t(assay(se)))
+  c(aic = aic, bic = bic)
+})
+
+par(mfrow=c(1,2))
+plot(kvec, res['aic', ], type = 'o', main = 'AIC', xlab = 'K', ylab = 'AIC')
+plot(kvec, res['bic', ], type = 'o', main = 'BIC', xlab = 'K', ylab = 'BIC')
+par(mfrow=c(1,1))
+```
+
+From the previous plots, we decide to use K = 10.
+
+```{r}
+load('zinb_k10_g1000.rda')
+```
+
+Colors are from the Usoskin et al. paper from Level3 labels.
+```{r}
+library(RColorBrewer)
+W = getW(zinb)
+w_tsne <- Rtsne(W, pca = FALSE)
+plot(w_tsne$Y, pch = 19, col = pal[colData(se)$Level3])
+legend('bottomright', legend = unique(colData(se)$Level3), 
+       fill = unique(pal[colData(se)$Level3]), cex = 0.5)
+```
+
+## PCA
+
+Let's check what we get when performing pca. We take the same number of dimensions as in zinbwave.
+
+```{r}
+norm10x = function (ei){
+  sums = colSums(ei)
+  eo = t(t(ei)*median(sums)/sums)
+  return(eo)
+}
+
+fastpca <- function(expr, scale=FALSE, k = 50) {
+  library(rARPACK)
+  svd_raw <- svds(scale(t(expr), center=TRUE, scale=scale),
+                  k=k, nu=k, nv=0)
+  pc_raw <- svd_raw$u %*% diag(svd_raw$d[1:k])
+  return(pc_raw)
+}
+```
+
+```{r}
+tc <- norm10x(assay(se)) 
+pc_tc <- fastpca(log1p(tc), k = 10)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col= pal[colData(se)$Level3], 
+     main = 'PCA, k = 10')
+legend('bottomright', legend = unique(colData(se)$Level3), 
+       fill = unique(pal[colData(se)$Level3]), cex = 0.5)
+```
+
+```{r}
+pc_tc <- fastpca(log1p(tc), k = 50)
+pc_tsne <- Rtsne(pc_tc, pca = FALSE)
+plot(pc_tsne$Y, pch=19, col=pal[colData(se)$Level3],
+     main = 'PCA, k = 50')
+legend('bottomright', legend = unique(colData(se)$Level3), 
+       fill = unique(pal[colData(se)$Level3]), cex = 0.5)
+```
+
+
+# Clustering
+
+We perform clustering on W.
+
+```{r}
+library(clusterExperiment)
+sese <- SummarizedExperiment(t(W), colData = colData(se))
+print(system.time(ce <- RSEC(sese, k0s = 4:15, alphas = c(0.1),
+                             betas = 0.8, dimReduce="none",
+                             clusterFunction = "hierarchical01",
+                             minSizes=1,
+                             ncores = NCORES, isCount=FALSE,
+                             dendroReduce="none",dendroNDims=NA,
+                             subsampleArgs = list(resamp.num=100, clusterFunction="kmeans", clusterArgs=list(nstart=10)),
+                             verbose=TRUE,
+                             combineProportion = 0.2,
+                             mergeMethod = "none", random.seed=424242,
+                             combineMinSize = 10)))
+save(ce, file = 'ce.rda')
+```
+
+```{r}
+library(clusterExperiment)
+load('ce.rda')
+```
+
+```{r examineCombineMany, fig.cap="RSEC: Candidate clusterings found using the function RSEC from the clusterExperiment package."}
+plotClusters(ce, colPalette = c(bigPalette, rainbow(199)))
+```
+
+
+
+```{r plotcoclust, fig.cap="RSEC: Heatmap of co-clustering matrix."}
+plotCoClustering(ce)
+```
+
+```{r tableclust}
+table(primaryClusterNamed(ce), colData(se)$Level3)
+```
+
+```{r barplotOurs, fig.cap="RSEC: Barplot of number of cells per cluster for our workflow's RSEC clustering."}
+plotBarplot(ce, legend = FALSE) 
+```
+
+
+```{r addPublishedClusters, fig.cap="RSEC: Barplot of number of cells per cluster, for our workflow's RSEC clustering, color-coded by original published clustering."}
+ce <- addClusters(ce, factor(colData(ce)$Level3), clusterLabel = "Level3")
+
+## change default color to match with Figure 7
+clusterLegend(ce)$Level3[, "color"] <- 
+  pal[clusterLegend(ce)$Level3[, "name"]]
+
+plotBarplot(ce, whichClusters=c("combineMany","Level3"),
+            xlab = "", legend = FALSE)
+```
+ 
+```{r}
+table(colData(ce)$Level3, primaryClusterNamed(ce))
+```
+
+
+```{r heatmapsClusters, fig.cap="RSEC: Heatmap of the normalized expression measures for the 1,000 most variable genes, where rows correspond to genes and columns to cells ordered by RSEC clusters."}
+# Set colors for cell clusterings
+colData(ce)$Level3 <- as.factor(colData(ce)$Level3)
+origClusterColors <- pal
+batchColors <- bigPalette[1:nlevels(colData(ce)$Pickingsessions)]
+metaColors <- list("Pickingsessions" = batchColors,
+                   "Level3" = origClusterColors)
+plotHeatmap(ce, visualizeData = log1p(tc),
+            whichClusters = "primary", clusterFeaturesData = "all",
+            clusterSamplesData = "dendrogramValue", breaks = 0.99,
+            sampleData = c("Level3", "Pickingsessions"),
+            clusterLegend = metaColors, annLegend = FALSE, main = "")
+```
+
+
+
+```{r}
+newClusters = primaryClusterNamed(ce)
+newPalDf <- ce@clusterLegend[[1]]
+newPal <- newPalDf[, "color"]
+names(newPal) <- newPalDf[, "name"]
+newPal["-1"] = "transparent"
+par(mfrow = c(1,2))
+plot(w_tsne$Y, pch = 19, col = pal[colData(se)$Level3])
+legend('bottomright', legend = unique(colData(se)$Level3), 
+       fill = unique(pal[colData(se)$Level3]), cex = 0.5)
+plot(w_tsne$Y, pch = 19, col = newPal[newClusters])
+legend('bottomright', legend = names(newPal), fill = newPal, cex = 0.5)
+par(mfrow = c(1,1))
+```
+
+```{r}
+colData(se)$ourClusters = newClusters
+save(se, file = 'seAfterClustering.rda')
+```

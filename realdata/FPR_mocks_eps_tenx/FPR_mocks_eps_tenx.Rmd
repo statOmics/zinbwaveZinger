@@ -1,0 +1,162 @@
+---
+title: "Case study on PBMC 10X-genomics - FPR on mocks"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(edgeR)
+library(zingeR)
+library(zinbwave)
+library(genefilter)
+```
+
+We want to evaluate the impact of the ridge penalty ($\epsilon$) of ZINB-WaVE on the TPR for the mock comparisons from the PBMC 10Xgenomics dataset.
+
+# Data
+```{r data}
+load('../tenx/pbmc3k/our_version/core.rda')
+core
+ncells = 45
+nreps = 10
+
+subsets = sapply(1:nreps, function(i){
+  set.seed(i)
+  c1 = sample(ncol(core), ncells, replace = FALSE)
+  remaining = seq_len(ncol(core))
+  remaining = remaining[!remaining %in% c1]
+  c2 = sample(remaining, ncells, replace = FALSE)
+  stopifnot(sum(c1 %in% c2) == 0 )
+  stopifnot(sum(c2 %in% c1) == 0 )
+  c(c1, c2)
+})
+subsets = as.data.frame(t(subsets))
+```
+
+# Influence of epsilon
+
+## Compute ZINB-WaVE posterior probabilities
+
+```{r dataEloop}
+eLoop <- core[,as.numeric(subsets[1,])]
+ngenes = sum(rowSums(assay(eLoop) > 0) < 5)
+cat(sprintf("Removing %s genes with only 0's", ngenes))
+eLoop <- eLoop[rowSums(assay(eLoop) > 0) > 4, ]
+condition = factor(rep(c("A", "B"), each = 45))
+colData(eLoop)$condition = condition
+design <- model.matrix(~ condition)
+epsVec = 10^seq(0,16,by=2)
+```
+
+```{r zinbesp,eval=FALSE}
+library(BiocParallel)
+library(doParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+zinbList <- lapply(epsVec, function(eps){
+  zinbFit(assay(eLoop), X = design, epsilon = eps)
+})
+save(zinbList, file = 'zinbList_epsilon.rda')
+```
+
+```{r}
+load('zinbList_epsilon.rda')
+```
+
+```{r pvals}
+computeZinbwaveWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
+}
+
+weightsList <- lapply(zinbList, function(x){
+  computeZinbwaveWeights(x, assay(eLoop))
+})
+```
+
+## Compute p-values
+
+We use egdeR with ZINB-WaVE posterior probabilities as observation weights.
+
+```{r}
+pvalsList <- lapply(weightsList[1:length(epsVec)], function(w){
+  d <- DGEList(assay(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  w[is.na(w)] = 1
+  d$weights <- w
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  lrt$table$PValue
+})
+```
+
+## Biological coefficient of variation (BCV)
+```{r mocksEspilonBCV}
+par(mfrow=c(3,4))
+myplot <- lapply(1:length(weightsList), function(i){
+  d <- DGEList(assay(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  w = weightsList[[i]]
+  w[is.na(w)] = 1
+  d$weights <- w
+  d=estimateDisp(d, design)
+  plotBCV(d, main = paste0('epsilon=', epsVec[i]), ylim = c(0,6))
+})
+par(mfrow=c(1,1))
+```
+
+## Posterior probabilities
+```{r mocksEspilonWeights}
+par(mfrow = c(3,4))
+hh = lapply(1:length(weightsList), function(i){
+   hist(weightsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
+})
+par(mfrow = c(1,1))
+```
+
+## FPR
+```{r fdrEps10x}
+fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
+print(length(fpr))
+plot(log10(epsVec), fpr, main = '', type = 'o',
+     xlab = expression(paste(epsilon,' (log10)')), ylab = 'FPR')
+abline(h = 0.05, col = 'red')
+```
+
+## Histogram of p-values.
+
+We are expecting uniform distribution for the p-values as the 2 groups contain cells that have been randomly sampled from all the cells. Therefore, the true number of DE genes is null. When $\epsilon < 10^6$ or $\epsilon > 10^{12}$, p-values are not uniformly distributed. When $10^6 < epsilon < 10^{12}$, pvalues are uniformly distributed.
+
+```{r fdrEps10xPval}
+par(mfrow = c(3,3))
+hh = lapply(1:length(epsVec), function(i){
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000))
+})
+par(mfrow = c(1,1))
+```
+
+## Conclusion
+
+$10^6 < \epsilon < 10^{12}$ seems to be reasonable.
+
+# sessionInfo()
+```{r}
+sessionInfo()
+```
+

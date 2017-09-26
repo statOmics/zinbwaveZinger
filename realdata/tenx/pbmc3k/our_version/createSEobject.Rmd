@@ -58,3 +58,8 @@ core
 unloadNamespace("Seurat")
 save(core, file = 'core.rda')
 ```
+
+# sessionInfo
+```{r}
+sessionInfo()
+```
