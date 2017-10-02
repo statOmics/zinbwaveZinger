@@ -1,5 +1,5 @@
 ---
-  title: "Compare DE methods for 10X genomics - edgeR and us"
+title: "Compare DE methods for 10X genomics"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
 output: 
@@ -20,69 +20,88 @@ library(RColorBrewer)
 library(ggplot2)
 ```
 
-After running Seurat preprocessing (filtering, normalization, dimensionality reduction, clustering), we want to find DE genes between clusters using Seurat DE tool, edgeR, edgeR with our weights. Then, we'll perform gene enrichment analysis.
+Using our clustering, we want to compare the different DE methods and perform gene set enrichment analysis.
 
+# Data
 ```{r loadobject}
-load("core_ourClusters.rda")
+load("coreAfterClustering.rda")
+dim(core)
+core = core[, colData(core)$ours %in% c(0,5)]
+dim(core)
+keepCells = colnames(core)
+temp = core
+
+load('../core.rda')
+dim(core)
+core = core[, keepCells]
+dim(core)
 core = core[rowSums(assay(core)) > 0, ]
-core
+dim(core)
 colData(core)$seurat = factor(colData(core)$seurat)
-colData(core)$seurat = factor(colData(core)$seurat)
+ours = colData(temp)$ours
+nn = gsub('-1', '', names(ours))
+ours = as.integer(as.vector(ours))
+names(ours) = nn
+colData(core)$ours = factor(ours[colnames(core)])
 ```
 
-### Finding differentially expressed genes (cluster biomarkers)
+# Compute ZINB-WaVE posterior probabilities
+
 ```{r fit}
-computeZinbwaveWeights <- function(zinb, counts){
-mu <- getMu(zinb)
-pi <- getPi(zinb)
-theta <- getTheta(zinb)
-theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
-nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
-zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
-t(zinbwg)
+# this fct should be in zinbwave package soon
+computeObservationalWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta_mat <- matrix(rep(theta, each = ncol(counts)),
+                      ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  t(zinbwg)
 }
 ```
 
-```{r}
-#previous epsilon=1e8
+```{r,eval=FALSE}
 library(doParallel)
 library(BiocParallel)
 NCORES = 2
 registerDoParallel(NCORES)
 register(DoparParam())
-print(system.time(zinb <- zinbFit(core, X = '~ seurat',
-epsilon = 1e12)))
-save(zinb, file = 'zinb.rda')
+print(system.time(zinb <- zinbFit(core, X = '~ ours', epsilon = 1e12)))
+save(zinb, file = 'zinbX_eps12.rda')
 ```
 
 ```{r weightszinb}
-load('zinb.rda')
+load('zinbX_eps12.rda')
 counts = assay(core)
-weights_zinbwave = computeZinbwaveWeights(zinb, counts)
+weights_zinbwave = computeObservationalWeights(zinb, counts)
 hist(weights_zinbwave, main = 'zinbwave', xlab = 'Weights')
 ```
 
+# DE methods
+
 ```{r}
-design = model.matrix(~ colData(core)$seurat)
+counts = assay(core)
+design = model.matrix(~ colData(core)$ours)
 ```
 
-# Run edgeR
+## Run edgeR
 ```{r fitedger}
 fit_edgeR <- function(counts, design, filter = NULL){
-library(edgeR)
-d = DGEList(counts)
-d = suppressWarnings(calcNormFactors(d))
-d = estimateDisp(d, design)
-fit = glmFit(d, design)
-glm = glmLRT(fit)
-tab = glm$table
-tab$padj = p.adjust(tab$PValue, "BH")
-tab$gene = rownames(tab)
-de <- as.data.frame(tab, stringsAsFactors = FALSE)
-de = de[, c('gene', 'PValue', 'padj', 'logFC')]
-colnames(de) = c('gene', 'pval', 'padj', 'logfc')
-de
+  library(edgeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d = estimateDisp(d, design)
+  fit = glmFit(d, design)
+  glm = glmLRT(fit)
+  tab = glm$table
+  tab$padj = p.adjust(tab$PValue, "BH")
+  tab$gene = rownames(tab)
+  de <- as.data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padj', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
 }
 ```
 
@@ -91,24 +110,23 @@ edgeR <- fit_edgeR(counts, design)
 edgeR$method <- 'edgeR'
 ```
 
-# Run edgeR with zinbwave weights
+## Run edgeR with zinbwave weights
 ```{r fitedgeRzi}
-fit_edgeR_zi <- function(counts, design, weights,
-filter = NULL){
-library(edgeR)
-library(zingeR)
-d = DGEList(counts)
-d = suppressWarnings(calcNormFactors(d))
-d$weights <- weights 
-d = estimateDisp(d, design)
-fit = glmFit(d,design)
-glm = glmWeightedF(fit, filter = filter)
-tab = glm$table
-tab$gene = rownames(tab)
-de <- data.frame(tab, stringsAsFactors = FALSE)
-de = de[, c('gene', 'PValue', 'padjFilter', 'logFC')]
-colnames(de) = c('gene', 'pval', 'padj', 'logfc')
-de
+fit_edgeR_zi <- function(counts, design, weights, filter = NULL){
+  library(edgeR)
+  library(zingeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d$weights <- weights 
+  d = estimateDisp(d, design)
+  fit = glmFit(d,design)
+  glm = glmWeightedF(fit, filter = filter)
+  tab = glm$table
+  tab$gene = rownames(tab)
+  de <- data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padjFilter', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
 }
 ```
 
@@ -125,7 +143,7 @@ zinbwave_edgeR$method <- 'zinbwave_edgeR'
 ```
 
 
-# Run DESeq2 with zinbwave weights
+## Run DESeq2 with zinbwave weights
 ```{r fitDESeq2zi}
 fit_DESeq2_zi <- function(counts, design, weights){
   library(DESeq2)
@@ -153,7 +171,7 @@ zinbwave_deseq2 <- fit_DESeq2_zi(counts, design,
 zinbwave_deseq2$method <- 'zinbwave_DESeq2'
 ```
 
-# Run DESeq2
+## Run DESeq2
 ```{r fitDESeq2}
 fit_DESeq2 <- function(counts, design){
   library(DESeq2)
@@ -178,7 +196,7 @@ deseq2 <- fit_DESeq2(counts, design)
 deseq2$method <- 'DESeq2'
 ```
 
-# Run MAST
+## Run MAST
 ```{r}
 runMAST <- function(counts, design){
   require(MAST)
@@ -202,7 +220,8 @@ runMAST <- function(counts, design){
   colData(sca) <- CD
   
   ## differential expression
-  fit <- zlm(~ cngeneson + group, sca = sca, method = "bayesglm", ebayes = TRUE)
+  fit <- zlm(~ cngeneson + group, sca = sca, method = "bayesglm",
+             ebayes = TRUE)
   summaryCond <- summary(fit, doLRT = 'group') 
   summaryDt <- summaryCond$datatable
   tab <- merge(summaryDt[contrast=='group' & component=='H', 
@@ -220,7 +239,7 @@ mast <- runMAST(counts, design)
 mast$method <- 'MAST'
 ```
 
-# Run Limma-voom
+## Run Limma-voom
 ```{r runlimmavoom}
 runLimmavoom <- function(counts, design) {
   library(limma)
@@ -243,20 +262,19 @@ voom <- runLimmavoom(counts, design)
 voom$method <- 'limmavoom'
 ```
 
-# Load Seurat results
-```{r}
+## Load Seurat results
+```{r,eval=FALSE}
 seurat = read.csv('tcellmarkers_seurat.csv')
 seurat$padj = NA
 seurat$method = 'seurat'
 seurat = seurat[, c('gene', 'p_val', 'padj', 'avg_diff', 'method')]
-colnames(seurat) = colnames(mast)
+colnames(seurat) = colnames(edgeR)
 ```
 
-# Concatenate all the result tables
-```{r}
+## Concatenate all the result tables
+```{r,eval=FALSE}
 # todo: add deseq2
-de = rbind(edgeR, deseq2, seurat, voom, mast, 
-           zinbwave_edgeR, zinbwave_deseq2)
+de = rbind(edgeR, seurat, voom, zinbwave_edgeR)
 write.csv(de, file = 'deGenes.csv', row.names = FALSE)
 ```
 
@@ -304,24 +322,32 @@ sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
 gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
 ```
 
-```{r}
+```{r tenxcaseNESallW}
+size=20
 ggplot(gseaDf, aes(method, pathway)) +
   geom_tile(aes(fill = NES)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
                        midpoint = 0, space = "Lab", 
-                       name="Enrichment score")
+                       name="Normalized\nEnrichment\nScore") +
+  ylab('Cell Type') + xlab('Method') 
 ```
 
-```{r}
-nes = gseaDf[grepl('CD4', gseaDf$pathway), 'NES']
+```{r tenxcaseNEScd4W}
+chosen = c('CD4+ memory T-cells','CD4+ Tem','CD4+ Tcm','CD4+ naive T-cells')
+sub = gseaDf[gseaDf$pathway %in% chosen, ]
+nes = sub$NES
 limit = max(abs(min(nes)), max(nes))
-ggplot(gseaDf[grepl('CD4', gseaDf$pathway), ], aes(method, pathway)) +
+sub$pathway = factor(sub$pathway, levels = chosen)
+ggplot(sub, aes(method, pathway)) +
   geom_tile(aes(fill = NES)) + 
-  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+  scale_fill_gradient2(low = "blue", high = "red", 
+                       mid = "white", 
                        midpoint = 0, space = "Lab", name="Normalized\nEnrichment\nScore", 
                        limit = c(-limit, limit)) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('Cell Type') + xlab('Method') +
+  theme(text = element_text(size = size))
 ```
 
 ```{r}
@@ -336,13 +362,20 @@ lapply(gsea_res, function(x){
 
 We are expecting uniformity of the pvalue with a pick close to zero corresponding to DE genes.
 
-```{r hist}
-par(mfrow= c(3,3))
+```{r tenxcaseHistPvalW}
+par(mfrow= c(2,2))
 for (x in unique(de$method)){
   hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 3000),
        xlab = 'pvalue')
 }
 par(mfrow= c(1,1))
+```
+## Number of DE genes
+```{r}
+for (x in unique(de$method)){
+  print(x)
+  print(sum(de[de$method ==x, 'pval'] < 0.05, na.rm = TRUE))
+}
 ```
 
 ## Concordance between DE genes
@@ -419,7 +452,7 @@ library(clusterExperiment)
 tt = lapply(unique(de$method), function(x){
   temp = de[de$method == x, ]
   degenes = temp[order(temp[, 'pval'])[1:10], 'gene']
-  cc = as.numeric(colData(core)$seurat)
+  cc = as.numeric(colData(core)$ours)
   plotHeatmap(tc[rownames(tc) %in% degenes, ], main = x,
               breaks = .99,
               sampleData = data.frame(clusters = cc))
@@ -440,14 +473,14 @@ fastpca <- function(expr, scale=FALSE, k = 25) {
   return(pc_raw)
 }
 
-par(mfrow = c(3,3))
+par(mfrow = c(2,2))
 for (x in unique(de$method)){
   temp = de[de$method == x, ]
   degenes = temp[temp$pval< 0.05, 'gene']
   ngenes = length(degenes)
   pca = fastpca(tc[rownames(tc) %in% degenes, ])
   pca_tsne <- Rtsne(pca, pca = FALSE)
-  plot(pca_tsne$Y, pch=19, col=as.numeric(colData(core)$seurat),
+  plot(pca_tsne$Y, pch=19, col=as.numeric(colData(core)$ours),
        main=paste(x, ', ', ngenes, ' DE genes'))
 }
 par(mfrow = c(1,1))

@@ -27,9 +27,12 @@ se = se[, colData(se)$Level3 == 'TH']
 dim(se)
 colData(se)$ourClusters[colData(se)$ourClusters=='c2'] = 'TH1'
 colData(se)$ourClusters[colData(se)$ourClusters=='c7'] = 'TH2'
-table(colData(se)$ourClusters, colData(se)$Pickingsessions,
-      colData(se)$Sex)
+table(colData(se)$ourClusters, colData(se)$Pickingsessions)
+table(colData(se)$ourClusters, colData(se)$Sex)
+table(colData(se)$Pickingsessions, colData(se)$Sex)
 ```
+
+
 ```{r}
 load('data/esetUsoskin.RData')
 eset=eset[rowSums(exprs(eset)>0)>=20,]
@@ -86,6 +89,7 @@ save(zinb, file = fn)
 ```{r}
 load('zinb_batch.rda')
 weights_batch = computeObservationalWeights(zinb, assay(se))
+hist(weights_batch)
 ```
 
 # Run DE methods
@@ -321,16 +325,18 @@ gsea_res = lapply(unique(de$method), function(x){
   temp = de[de$method == x, ]
   degenes = temp$logfc
   names(degenes) = toupper(temp$gene)
-  gsea = fgsea(gs, degenes, nperm = 10000, minSize = 5)
+  gsea = fgsea(gs, degenes, nperm = 1000, minSize = 10)
   gsea$method = x
+  gsea$NES[is.na(gsea$NES)] = rnorm(n = sum(is.na(gsea$NES)), 0, 0.005) 
   gsea[order(-abs(gsea$NES)), ]
 })
 lapply(gsea_res, head)
 ```
+
 ```{r}
 gseaDf = as.data.frame(do.call(rbind, gsea_res))
 gseaDf = gseaDf[, c('method', 'pathway', 'NES')]
-gseaDf$method = factor(gseaDf$method, levels = c('edgeR', 'limmavoom', 'zinbwave_edgeR'))
+gseaDf$method = factor(gseaDf$method, levels = c('limmavoom','edgeR',  'zinbwave_edgeR'))
 sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
 sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
 gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
@@ -345,6 +351,64 @@ ggplot(gseaDf, aes(method, pathway)) +
     name="Enrichment score")
 ```
 
+## Gene ontology
+ 
+```{r,eval=FALSE}
+fl <- "http://www.geneontology.org/ontology/subsets/goslim_generic.obo"
+fl <- "http://data.pantherdb.org/PANTHER12/ontology/PANTHERGOslim.obo"
+obo = getOBOCollection(fl, evidenceCode="TAS")
+
+subsets(obo)
+obo['goslim_mouse']
+
+
+rownames(se) = rowData(se)[,1]
+es=as(se, "ExpressionSet")
+annotation(es)="hgu95av2"
+gsc <- GeneSetCollection(es, setType = GOCollection())
+
+GeneSetCollection(rowData(se)[,1], idType = , setType="GOCollection")
+
+## Not run: 
+
+
+genesets <- unlist(geneIds(xCell.data$signatures))
+celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
+names(genesets) <- NULL
+gs <- tapply(genesets, celltypes, c)
+de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.005) 
+# MAST creates NAs for log fold change but fgsea does not handle NAs, so I artificially creates small log fold change. rnorm with mean = 0, and not 0 because fgsea does not handle tights.
+set.seed(6372)
+gsea_res = lapply(unique(de$method), function(x){
+  print(x)
+  temp = de[de$method == x, ]
+  degenes = temp$logfc
+  names(degenes) = toupper(temp$gene)
+  gsea = fgsea(gs, degenes, nperm = 1000, minSize = 10)
+  gsea$method = x
+  gsea$NES[is.na(gsea$NES)] = rnorm(n = sum(is.na(gsea$NES)), 0, 0.005) 
+  gsea[order(-abs(gsea$NES)), ]
+})
+lapply(gsea_res, head)
+```
+
+```{r,eval=FALSE}}
+temp = de[de$method == 'zinbwave_edgeR', ]
+degenes = temp[abs(temp$logfc) > 1 & temp$pval < 0.05, 'gene']
+write.csv(data.frame(genes = degenes),'de_zinbwave.csv')
+
+temp = de[de$method == 'edgeR', ]
+degenes = temp[abs(temp$logfc) > 1 & temp$pval < 0.05, 'gene']
+write.csv(data.frame(genes = degenes),'de_edger.csv')
+
+temp = de[de$method == 'limmavoom', ]
+degenes = temp[abs(temp$logfc) > 1 & temp$pval < 0.05, 'gene']
+write.csv(data.frame(genes = degenes),'de_limma.csv')
+```
+
+
+
+
 ## Histogram of pvalues
 
 We are expecting uniformity of the pvalue with a pick close to zero corresponding to DE genes.
@@ -358,19 +422,6 @@ for (x in unique(de$method)){
 par(mfrow= c(1,1))
 ```
 
-## Volcano plots
-
-I think it should be adjusted pvalues instead. In edgeR and DESeq2, I think there are functions to filter genes with high fold change but low pvalue. TODO: look at that to improve volcano plots.
-```{r}
-par(mfrow=c(3,3))
-for (x in unique(de$method)){
-  temp = de[de$method == x, ]
-  plot(temp[, 'logfc'], -log10(temp[, 'pval']),
-       pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 50),
-       ylab = '-log10(pvalue)', xlab = 'logFC', main = x)
-}
-par(mfrow=c(1,1))
-```
 
 ## Concordance between DE genes
 ### Venn diagram

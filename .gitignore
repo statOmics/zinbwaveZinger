@@ -1,6 +1,5 @@
-zinbwaveSimulations/islam_sims_fc2/zinb-common-disp-fc2.rda
-zinbwaveSimulations/islam_sims_fc2/zinb-genewise-disp-fc2.rda
 *.html
+*.rda
 outs/
 *.png
 zinbwaveSimulations/tenX_sims_fc2/outs/*

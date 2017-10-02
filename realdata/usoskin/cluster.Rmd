@@ -67,7 +67,7 @@ se <- se[vargenes,]
 ```
 
 ## ZINB-WaVE
-```{r}
+```{r aicbicUsoskin}
 kvec = c(0, 2, 4, 6, 8, 10, 20, 30, 40, 50)
 if (FALSE){
   for (k in kvec){
@@ -109,8 +109,8 @@ res = sapply(kvec, function(k){
 })
 
 par(mfrow=c(1,2))
-plot(kvec, res['aic', ], type = 'o', main = 'AIC', xlab = 'K', ylab = 'AIC')
-plot(kvec, res['bic', ], type = 'o', main = 'BIC', xlab = 'K', ylab = 'BIC')
+plot(kvec, res['aic', ], type = 'o', main = 'AIC', xlab = 'K', ylab = 'AIC',cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5)
+plot(kvec, res['bic', ], type = 'o', main = 'BIC', xlab = 'K', ylab = 'BIC',cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5)
 par(mfrow=c(1,1))
 ```
 
@@ -174,7 +174,7 @@ legend('bottomright', legend = unique(colData(se)$Level3),
 
 We perform clustering on W.
 
-```{r}
+```{r,eval=FALSE}
 library(clusterExperiment)
 sese <- SummarizedExperiment(t(W), colData = colData(se))
 print(system.time(ce <- RSEC(sese, k0s = 4:15, alphas = c(0.1),
@@ -199,8 +199,6 @@ load('ce.rda')
 ```{r examineCombineMany, fig.cap="RSEC: Candidate clusterings found using the function RSEC from the clusterExperiment package."}
 plotClusters(ce, colPalette = c(bigPalette, rainbow(199)))
 ```
-
-
 
 ```{r plotcoclust, fig.cap="RSEC: Heatmap of co-clustering matrix."}
 plotCoClustering(ce)
@@ -245,20 +243,22 @@ plotHeatmap(ce, visualizeData = log1p(tc),
             clusterLegend = metaColors, annLegend = FALSE, main = "")
 ```
 
-
-
-```{r}
+```{r compareClusteringUsoskin}
 newClusters = primaryClusterNamed(ce)
 newPalDf <- ce@clusterLegend[[1]]
 newPal <- newPalDf[, "color"]
 names(newPal) <- newPalDf[, "name"]
 newPal["-1"] = "transparent"
 par(mfrow = c(1,2))
-plot(w_tsne$Y, pch = 19, col = pal[colData(se)$Level3])
+plot(w_tsne$Y, pch = 19, col = pal[colData(se)$Level3], cex = 1.5,
+     xlab = 'Coordinate 1', ylab = 'Coordinate 2')
 legend('bottomright', legend = unique(colData(se)$Level3), 
-       fill = unique(pal[colData(se)$Level3]), cex = 0.5)
-plot(w_tsne$Y, pch = 19, col = newPal[newClusters])
-legend('bottomright', legend = names(newPal), fill = newPal, cex = 0.5)
+       fill = unique(pal[colData(se)$Level3]), 
+       title = 'Published', cex=0.8)
+plot(w_tsne$Y, pch = 19, col = newPal[newClusters], cex = 1.5,
+     xlab = 'Coordinate 1', ylab = 'Coordinate 2')
+legend('bottomright', legend = names(newPal), fill = newPal,
+       title = 'Ours', cex=0.8)
 par(mfrow = c(1,1))
 ```
 

@@ -322,7 +322,7 @@ runSCDE <- function(e){
 load('../tenx/pbmc3k/our_version/core.rda')
 core
 ncells = 45
-nreps = 10
+nreps = 30
 
 subsets = sapply(1:nreps, function(i){
   set.seed(i)
@@ -348,11 +348,9 @@ algos <- list("DESeq2"          = runDESeq2,
               "edgeR-zingeR"    = runEdgeREMLibSize,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
-              "MAST"            = runMAST,
-              "scde"            = runSCDE)
+              "MAST"            = runMAST)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
-nreps <- 1
 ```
 
 ```{r,eval=FALSE}
@@ -384,7 +382,7 @@ res <- lapply(1:nreps, function(i) {
 ```
 
 ## Boxplots
-```{r fpr10x}
+```{r prepBoxplots}
 hlp=lapply(res,function(replication){
   lapply(replication,function(method){
     pval=method$pvals
@@ -400,7 +398,7 @@ rownames(fprHat)=namesAlgos
 boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
-```{r}
+```{r fpr10x}
 ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
        aes(x=reorder(method,fpr,median),y=fpr)) +
   geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
@@ -408,7 +406,8 @@ ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
                color="grey50", size=1) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
   scale_colour_discrete(guide="none") + ylab("False Positive Rate") +
-  geom_hline(aes(yintercept=0.05,colour="red"))
+  geom_hline(aes(yintercept=0.05,colour="red")) +
+  theme(text = element_text(size=20))
 ```
 
 ## Histograms of pvalues
@@ -416,9 +415,9 @@ ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
 keep = !grepl('zingeR', names(res[[1]]))
 idx = 1:length(res[[1]])
 idx = idx[keep]
-par(mfrow=c(2,3))
+par(mfrow=c(3,3))
 hh <- sapply(idx, function(i){
-  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="",
+  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="p-values",cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5,
        breaks=seq(0,1,by=0.05)) 
 })
 par(mfrow=c(1,1))

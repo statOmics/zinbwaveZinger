@@ -46,7 +46,7 @@ expit <- function(x) 1/(1+exp(-x))
 logLib = log(colSums(usoskin))
 pZero = colMeans(usoskin == 0)
 plot(x = logLib, y = pZero, xlab = "Log library size", ylab = "Fraction of zero's",
-     main = "", cex.lab = 2, cex.main = 2, bty = "l", pch = 1, cex.axis = 1.5,
+     main = "", cex.lab = 1.5, cex.main = 1.5, bty = "l", pch = 1, cex.axis = 1.5,
      col = as.numeric(pickingSession))
 m = glm(pZero ~ logLib, family = "binomial")
 a = coef(m)[1]
@@ -121,8 +121,8 @@ weights_batch = computeObservationalWeights(zinb_batch, assay(se))
 
 ```{r histWeightsUsoskin}
 ylim = c(0, 3e6)
-hist(weights_batch[assay(se) == 0], main = "", cex.lab = 2,
-     xlab = "Posterior probability", cex.axis = 2, ylim=ylim)
+hist(weights_batch[assay(se) == 0], main = "", cex.lab = 1.5,
+     xlab = "Posterior probability", cex.axis = 1.5, ylim=ylim)
 hist(weights_nobatch[assay(se) == 0], add = TRUE, ylim=ylim,
      col = rgb(0.1, 0.8, 0.1, .2))
 legend("topright", c("picking session + eff. lib. size",
@@ -132,7 +132,7 @@ mtext("c", at = -.25, font = 2, cex = 4/3)
 ```
 ```{r qqplotWeightsBatch}
 qqplot(weights_batch[assay(se) == 0], weights_nobatch[assay(se) == 0],
-       type = 'l', xlab='Posterior Probabilities - Batch', main = 'QQplot',
+       type = 'l', xlab='Posterior Probabilities - Batch', main = '',cex.lab = 1.5,cex.axis= 1.5,
        ylab='Posterior Probabilities - No Batch')
 abline(a=0,b=1,col='gray')
 ```
@@ -431,14 +431,14 @@ algos <- list("DESeq2"          = runDESeq2,
               "MAST"            = runMAST)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
-nreps <- 1
+nreps <- 30
 ```
 
-```{r,eval=FALSE}
+```{r}
 NCORES <- 2
 registerDoParallel(NCORES)
 register(DoparParam())
-res <- lapply(1:nreps, function(i) {
+res <- lapply(14:nreps, function(i) {
     cat(i," ")
     eLoop <- eset[,as.numeric(subsets[i,])]
     # We remove genes with only zeros as zinbwave needs to remove these genes
@@ -467,7 +467,7 @@ res <- lapply(1:nreps, function(i) {
 
 ## Boxplots
 
-```{r fprUsoskin}
+```{r}
 hlp=lapply(res,function(replication){
   lapply(replication,function(method){
     pval=method$pvals
@@ -483,7 +483,7 @@ rownames(fprHat)=namesAlgos
 boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
-```{r}
+```{r fprUsoskin}
 ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
        aes(x=reorder(method,fpr,median),y=fpr)) +
   geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
@@ -491,7 +491,8 @@ ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
                color="grey50", size=1) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
   scale_colour_discrete(guide="none")  + ylab("False Positive Rate") +
-  geom_hline(aes(yintercept=0.05,colour="red"))
+  geom_hline(aes(yintercept=0.05,colour="red")) +
+  theme(text = element_text(size=20))
 ```
 
 ## Histograms of pvalues
@@ -501,7 +502,7 @@ idx = 1:length(res[[1]])
 idx = idx[keep]
 par(mfrow=c(3,3))
 hh <- sapply(idx, function(i){
-  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="",
+  hist(res[[1]][[i]]$pvals, main=names(algos)[i], cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5,xlab='p-values',
        breaks=seq(0,1,by=0.05)) 
 })
 par(mfrow=c(1,1))

@@ -16,7 +16,6 @@ knitr::opts_chunk$set(fig.align="center", cache=FALSE, error=FALSE, message=FALS
 library(SingleCellExperiment)
 ```
 
-
 ```{r loadobject}
 loadNamespace("Seurat")
 load("pbmc3k_subCD4.Rda")
@@ -32,12 +31,12 @@ counts = pbmc@raw.data[, keepcells]
 counts = as.matrix(counts)
 counts = counts[rowSums(counts) > 0, ]
 
-keepcells = as.integer(pbmc@ident) %in% 1:2
-counts = counts[, keepcells]
+#keepcells = as.integer(pbmc@ident) %in% 1:2
+#counts = counts[, keepcells]
 
 # coldata
 clusters = as.integer(pbmc@ident)
-clusters = clusters[clusters %in% 1:2]
+#clusters = clusters[clusters %in% 1:2]
 
 cData = data.frame(seurat = clusters)
 rownames(cData) = colnames(counts)
