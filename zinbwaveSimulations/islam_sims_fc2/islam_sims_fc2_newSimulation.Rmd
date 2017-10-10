@@ -34,8 +34,8 @@ library(ggplot2)
 library(cowplot)
 # use new simulation.
 #library(zingeR)
-source("../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R")
-```
+pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))```
 
 
 ```{r cores}
@@ -158,6 +158,33 @@ limma <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ## scRNA-seq methods
+
+### scde
+
+We encounter errors with the latest version of scde, as documented here: https://groups.google.com/forum/#!topic/singlecellstats/rbFUTOQ9wu4. We followed the guidelines suggested by the authors and work with version 1.99.2.
+
+```{r scde}
+scde <- function(counts, group, ylim=NULL, xlim=NULL){
+  counts = matrix(as.integer(counts),nrow=nrow(counts),ncol=ncol(counts))
+  if(is.null(colnames(counts))) colnames(counts)=paste0("sample",1:ncol(counts))
+  require(scde)
+
+  # calculate error models
+  o.ifm <- scde.error.models(counts = counts, groups = group, n.cores = 1, threshold.segmentation = TRUE, save.crossfit.plots = FALSE, save.model.plots = FALSE, verbose = 0)
+  # estimate gene expression prior
+  o.prior <- scde.expression.prior(models = o.ifm, counts = counts, length.out = 400, show.plot = FALSE)
+  # calculate differential expression
+  ediff <- scde.expression.difference(o.ifm, counts, o.prior, groups  =  group, n.randomizations  =  150, n.cores  =  1, verbose  =  0)
+  lfc <- ediff$mle
+  pval=(1-pnorm(abs(ediff$Z)))*2
+  padj=(1-pnorm(abs(ediff$cZ)))*2
+  out = cbind(pval,padj,lfc)
+  return(out)
+}
+
+```
+
+
 ### MAST
 ```{r MAST}
 ### copied code from FPR_mocks.Rmd on September 14, 2017.
@@ -199,7 +226,8 @@ MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   names(padjAll)=rownames(counts)
   padjAll[match(names(padj),names(padjAll))] = padj
 
-  list(pval = pvalAll, padj = padjAll, logfc = NA)
+  out = cbind(pval = pvalAll, padj = padjAll, logfc = NA)
+  return(out)
 }
 
 
@@ -325,7 +353,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 zinbwave_limma <- function(counts, group, zinb){
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- computeZinbwaveWeights(zinb, d$counts)
+  zeroWeights <- computeZinbwaveWeights(zinb, counts)
   y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
             weights = zeroWeights)
   y$weights <- y$weights * zeroWeights
@@ -367,6 +395,7 @@ myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma,
              MAST = MAST,
+             scde = scde,
              zingeR_DESeq2 = zingeR_DESeq2,
              zingeR_edgeR = zingeR_edgeR,
              zingeR_limmavoom = zingeR_limma)
@@ -387,6 +416,7 @@ par(mfrow = c(1,1))
 ```
 
 ```{r res}
+#load("resIslamFc2.rda")
 res = lapply(res, as.data.frame)
 for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 ```
