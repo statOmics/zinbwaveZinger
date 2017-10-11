@@ -377,13 +377,13 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-#zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
-#save(zinb_c, file = 'zinb-common-disp-fc2.rda')
-load('zinb-common-disp-fc2.rda')
+#zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
+#save(zinb_c, file = 'zinb-common-disp-fc2-eps12.rda')
+load('zinb-common-disp-fc2-eps12.rda')
 ```
 
 ```{r zinbgenewisedisp}
-#zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
+zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE, epsilon=1e12)
 #save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
 load('zinb-genewise-disp-fc2.rda')
 ```
@@ -412,6 +412,12 @@ res[['ZINB-WaVE_limmavoom_common']]  = zinbwave_limma(counts, grp, zinb_c)
 res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
+
+
+res[['ZINB-WaVE_edgeR_common12']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB-WaVE_DESeq2_common12']] = zinbwave_DESeq2(counts, grp, zinb_c)
+
+
 par(mfrow = c(1,1))
 ```
 
