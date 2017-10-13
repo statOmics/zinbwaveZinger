@@ -176,7 +176,9 @@ computeZinbwaveWeights <- function(zinb, counts){
   nb_part <- dnbinom(t(counts), size = theta, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
   zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
-  t(zinbwg)
+  w <- t(zinbwg)
+  w[counts > 0] = 1
+  w
 }
 
 runZinbwaveEdgeR <- function(e){
@@ -399,26 +401,35 @@ boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
 ```{r fpr10x}
-ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
+boxplotData = boxplotData[!grepl('zingeR', boxplotData$method),]
+ourcol = rep(1, length(unique(boxplotData$method)))
+ourcol[c(2, 4)] = 4 #our methods in blue
+ggplot(boxplotData,
        aes(x=reorder(method,fpr,median),y=fpr)) +
-  geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
+  theme_bw() +
     geom_point(position = position_jitter(w = 0.1, h = 0),
                color="grey50", size=1) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
-  scale_colour_discrete(guide="none") + ylab("False Positive Rate") +
+  scale_colour_discrete(guide="none") + ylab("PCER") +
   geom_hline(aes(yintercept=0.05,colour="red")) +
   theme(text = element_text(size=20))
 ```
 
 ## Histograms of pvalues
 ```{r fpr10xPval}
+library(scales)
 keep = !grepl('zingeR', names(res[[1]]))
 idx = 1:length(res[[1]])
 idx = idx[keep]
 par(mfrow=c(3,3))
 hh <- sapply(idx, function(i){
-  hist(res[[1]][[i]]$pvals, main=names(algos)[i], xlab="p-values",cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5,
-       breaks=seq(0,1,by=0.05)) 
+  col = 'white'
+  if (i %in% c(4,7)) col = 'blue'
+  hist(res[[1]][[i]]$pvals, main = names(algos)[i],
+       xlab = "p-values", cex.lab = 1.5, 
+       cex.axis =  1.5, cex.main = 1.5, col = alpha(col, .8),
+       breaks = seq(0, 1, by = 0.05)) 
 })
 par(mfrow=c(1,1))
 ```

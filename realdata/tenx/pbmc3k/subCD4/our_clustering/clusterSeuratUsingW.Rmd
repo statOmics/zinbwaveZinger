@@ -31,6 +31,7 @@ core = core[rowData(core)$seuratVarGenes, ]
 dim(core)
 
 # zinb 
+# tried K=25 as well
 load('zinb_k25.rda')
 W = getW(zinb)
 dim(W)

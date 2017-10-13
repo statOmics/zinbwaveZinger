@@ -85,7 +85,9 @@ computeZinbwaveWeights <- function(zinb, counts){
 }
 
 weightsList <- lapply(zinbList, function(x){
-  computeZinbwaveWeights(x, exprs(eLoop))
+  w=computeZinbwaveWeights(x, exprs(eLoop))
+  w[exprs(eLoop) > 0] = 1
+  w
 })
 ```
 
@@ -124,7 +126,7 @@ par(mfrow=c(1,1))
 ```{r mocksEspilonWeights}
 par(mfrow = c(3,4))
 hh = lapply(1:length(weightsList), function(i){
-   hist(weightsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
+   hist(weightsList[[i]][exprs(eLoop)==0], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
 })
 par(mfrow = c(1,1))
 ```
@@ -134,7 +136,7 @@ par(mfrow = c(1,1))
 fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
 print(length(fpr))
 plot(log10(epsVec), fpr, main = '', type = 'o', 
-     xlab = expression(paste(epsilon, ' (log10)')), ylab = 'FPR',cex.lab = 1.5,cex.axis= 1.5)
+     xlab = expression(paste(epsilon, ' (log10)')), ylab = 'PCER',cex.lab = 1.5,cex.axis= 1.5)
 abline(h = 0.05, col = 'red')
 ```
 

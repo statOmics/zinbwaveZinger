@@ -53,7 +53,8 @@ kvec = c(0, 3, 5, 8, 10, 15, 20, 25, 30, 45)
 if (FALSE){
   for (k in kvec){
     print(k)
-    print(system.time(zinb <- zinbFit(core, epsilon = 1e4, K = k)))
+    #tried eps = 1e4
+    print(system.time(zinb <- zinbFit(core, epsilon = 1e12, K = k)))
     fn = sprintf('zinb_k%s.rda', k)
     save(zinb, file = fn)
   }
@@ -96,10 +97,10 @@ plot(kvec, res['bic', ], type = 'o', main = 'BIC', xlab = 'K', ylab = 'BIC')
 par(mfrow=c(1,1))
 ```
 
-From the previous plots, we decide to use K = 10.
+From the previous plots, we decide to use K = 20 as suggested by AIC.
 
 ```{r loadChosen}
-load('zinb_k25.rda')
+load('zinb_k20.rda')
 ```
 
 # TSNE on W

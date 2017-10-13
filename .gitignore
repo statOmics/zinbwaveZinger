@@ -1,5 +1,5 @@
 *.html
-*.rda
+*rda
 outs/
 *.png
 zinbwaveSimulations/tenX_sims_fc2/outs/*

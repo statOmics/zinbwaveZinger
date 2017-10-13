@@ -43,19 +43,21 @@ computeObservationalWeights <- function(zinb, counts){
   nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
   zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
-  t(zinbwg)
+  w <- t(zinbwg)
+  w[counts > 0] <- 1
+  w
 }
 ```
 
 
 ```{r,eval=FALSE}
-#previous epsilon=1e12
+#previous epsilon=1e8 but then looked at mocks
 library(doParallel)
 library(BiocParallel)
 NCORES = 2
 registerDoParallel(NCORES)
 register(DoparParam())
-print(system.time(zinb <- zinbFit(core, X = '~ seurat', epsilon = 1e8)))
+print(system.time(zinb <- zinbFit(core, X = '~ seurat', epsilon = 1e12)))
 save(zinb, file = 'zinb.rda')
 ```
 
@@ -64,6 +66,9 @@ load('zinb.rda')
 counts = assay(core)
 weights_zinbwave = computeObservationalWeights(zinb, counts)
 hist(weights_zinbwave, main = 'zinbwave', xlab = 'Weights')
+```
+```{r weightszinbZeros}
+hist(weights_zinbwave[assay(core) == 0], main = 'zinbwave', xlab = 'Weights')
 ```
 
 ```{r}
@@ -359,6 +364,7 @@ par(mfrow= c(1,1))
 for (x in unique(de$method)){
   print(x)
   print(sum(de[de$method ==x, 'pval'] < 0.05, na.rm = TRUE))
+  print(sum(de[de$method ==x, 'padj'] < 0.05, na.rm = TRUE))
 }
 ```
 

@@ -1,0 +1,372 @@
+---
+title: "Time benchmark of the different methods"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+```
+
+We want to time benchmark the different DE methods.
+
+# Functions
+```{r}
+computeObservationalWeights <- function(zinb, counts){
+  mu <- getMu(zinb)
+  pi <- getPi(zinb)
+  theta <- getTheta(zinb)
+  theta <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
+  nb_part <- dnbinom(t(counts), size = theta, mu = mu)
+  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  w <- t(zinbwg)
+  w[counts > 0] <- 1
+  w
+}
+```
+
+```{r sourceEdgeR}
+runEdgeR <- function(e) {
+  library(edgeR)
+  library(zingeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  dgel=estimateDisp(dgel,design)
+  edger.fit <- glmFit(dgel, design)
+  edger.lrt <- glmLRT(edger.fit, coef="conditionB")
+  pvals <- edger.lrt$table$PValue
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  logfc <- edger.lrt$table$logFC
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+
+```
+
+```{r deseq2}
+runDESeq2_poscounts <- function(e) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
+  dds <- estimateSizeFactors(dds,type="poscounts")
+  dds <- estimateDispersions(dds)
+  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
+  res <- results(dds, name="condition_B_vs_A")
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  logfc <- res$log2FoldChange
+  list(pvals=pvals, padj=padj, logfc = logfc)
+}
+```
+
+
+```{r zingerdeseq2}
+pvalueAdjustment_kvdb <- function(baseMean, filter, pValue,
+                             theta, alpha=0.05, pAdjustMethod="BH") {
+  # perform independent filtering
+    if (missing(filter)) {
+      filter <- baseMean
+    }
+    if (missing(theta)) {
+      lowerQuantile <- mean(filter == 0)
+      if (lowerQuantile < .95) upperQuantile <- .95 else upperQuantile <- 1
+      theta <- seq(lowerQuantile, upperQuantile, length=50)
+    }
+
+    # do filtering using genefilter
+    stopifnot(length(theta) > 1)
+    filtPadj <- filtered_p(filter=filter, test=pValue,
+                           theta=theta, method=pAdjustMethod)
+    numRej  <- colSums(filtPadj < alpha, na.rm = TRUE)
+    # prevent over-aggressive filtering when all genes are null,
+    # by requiring the max number of rejections is above a fitted curve.
+    # If the max number of rejection is not greater than 10, then don't
+    # perform independent filtering at all.
+    lo.fit <- lowess(numRej ~ theta, f=1/5)
+    if (max(numRej) <= 10) {
+      j <- 1
+    } else {
+      residual <- if (all(numRej==0)) {
+        0
+      } else {
+        numRej[numRej > 0] - lo.fit$y[numRej > 0]
+      }
+      thresh <- max(lo.fit$y) - sqrt(mean(residual^2))
+      j <- if (any(numRej > thresh)) {
+        which(numRej > thresh)[1]
+      } else {
+        1
+      }
+    }
+    padj <- filtPadj[, j, drop=TRUE]
+    cutoffs <- quantile(filter, theta)
+    filterThreshold <- cutoffs[j]
+    filterNumRej <- data.frame(theta=theta, numRej=numRej)
+    filterTheta <- theta[j]
+
+    return(list(padj=padj, filterThreshold=filterThreshold, filterTheta=filterTheta, filterNumRej = filterNumRej, lo.fit=lo.fit, alpha=alpha))
+
+}
+```
+
+```{r zinbwaveEdgeR}
+runZinbwaveEdgeR <- function(e){
+  library(zinbwave)
+  library(edgeR)
+  library(zingeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
+  weights <- computeObservationalWeights(zinb, exprs(e))
+  # use zingeR-edgeR
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- weights
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  pvals = lrt$table$PValue
+  list(pvals = pvals, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
+}
+```
+
+```{r zinbwavedeseq2}
+runZinbwaveDESeq2 <- function(e){
+  library(zinbwave)
+  library(DESeq2)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
+  zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
+  weights <- computeObservationalWeights(zinb, exprs(e))
+  # use zingeR-DESeq2
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dimnames(weights) = NULL
+  assays(dse)[["weights"]] = weights
+  dse <- estimateDispersions(dse)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  resultsNames(dse)
+  res = results(dse, name="conditionB")
+  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
+}
+```
+
+```{r}
+runMAST <- function(e){
+  require(MAST)
+  counts <- exprs(e)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,
+                    cData=data.frame(group=pData(e)$condition,
+                                     pickingSession=pData(e)$pickingSession))
+  
+  # Adaptive thresholding from MAST vignette
+  freq_expressed <- 0.2
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
+                                     conditions = pData(e)$condition)
+  #par(mfrow=c(5,4))
+  #plot(thres)
+  assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
+  expressed_genes <- freq(sca) > freq_expressed
+  sca <- sca[expressed_genes,]
+
+  ngeneson <- apply(exprs(e),2,function(x) mean(x>0))
+  CD <- colData(sca)
+  CD$ngeneson <- ngeneson
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group + pickingSession, sca = sca,
+             method = "bayesglm", ebayes = TRUE)
+  L <- matrix(0, nrow = ncol(coef(fit, "D")))
+  rownames(L) <- colnames(coef(fit, "D"))
+  L["groupB",] <- 1
+  lrFit <- lrTest(fit, hypothesis = L)
+  pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
+  padj <- p.adjust(pval, method = "BH")
+  list(pvals = pval, padj = padj, logfc = NA)
+}
+```
+
+```{r limmavoom}
+runVoom <- function(e) {
+  library(limma)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  dgel <- DGEList(exprs(e))
+  dgel <- edgeR::calcNormFactors(dgel)
+  v <- voom(dgel,design,plot=FALSE)
+  fit <- lmFit(v,design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef="conditionB",n=nrow(dgel),sort.by="none")
+  pvals <- tt$P.Value
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=tt$logFC)
+}
+```
+
+```{r}
+runDESeq2 <- function(e, retDDS=FALSE) {
+  library(DESeq2)
+  dds <- DESeqDataSetFromMatrix(exprs(e), DataFrame(pData(e)), ~ condition)
+  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE)
+  res <- results(dds)
+  beta <- res$log2FoldChange
+  pvals <- res$pvalue
+  padj <- res$padj
+  pvals[is.na(pvals)] <- 1
+  padj[is.na(padj)] <- 1
+  list(pvals=pvals, padj=padj, logfc=NA)
+}
+```
+
+```{r scde}
+runSCDE <- function(e){
+  require(scde)
+  # calculate models
+  counts = exprs(e)
+  rownames(counts) = fData(e)[,1]
+  o.ifm <- scde.error.models(counts = counts,
+                             groups = pData(e)$condition, 
+                             n.cores = 1,
+                             threshold.segmentation = TRUE,
+                             save.crossfit.plots = FALSE, 
+                             save.model.plots = FALSE, 
+                             verbose = 0)
+  # estimate gene expression prior
+  o.prior <- scde.expression.prior(models = o.ifm,
+                                   counts = exprs(e),
+                                   length.out = 400,
+                                   show.plot = FALSE)
+  # run differential expression tests on all genes.
+  ediff <- scde.expression.difference(o.ifm, exprs(e), 
+                                      o.prior, 
+                                      groups  =  pData(e)$condition,
+                                      n.randomizations  =  100,
+                                      n.cores  =  2, 
+                                      verbose  =  0,
+                                      batch=factor(pData(e)$pickingSession))
+  pvals = (1 - pnorm(abs(ediff[[1]]$Z))) * 2
+  padj = p.adjust(pvals, method = "BH")
+  list(pvals = pvals, padj = padj, logfc = NA)
+}
+```
+
+# Data
+## Usoskin
+```{r data}
+library(zinbwave)
+path = '../realdata/usoskin/data/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+file = paste0(path, "subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+cData = pData(eset)[,c('Level 3', 'Picking sessions')]
+colnames(cData) = c('Level3', 'Pickingsessions')
+
+usoskin <- eset[,as.numeric(subsets[1,])]
+usoskin <- usoskin[rowSums(exprs(usoskin)) != 0, ]
+condition=factor(rep(c("A","B"),each=45))
+pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+pData(usoskin)$condition=condition
+pData(usoskin)$pickingSession=pickingSession
+```
+
+## tenX
+```{r}
+load("../../realdata/tenx/pbmc3k/subCD4/core.rda")
+tenx = core[,colData(core)$seurat %in% 1:2]
+tenx = tenx[rowSums(assay(tenx)) > 0, ]
+colData(tenx)$cellType = factor(colData(tenx)$seurat)
+tenx
+dim(tenx)
+```
+
+## islam
+```{r}
+data(islamEset, package = "zingeR")
+islam=islamEset[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
+dim(islam)
+```
+
+
+# Benchmark
+
+## Time benchmarking
+```{r res}
+algos <- list("DESeq2"          = runDESeq2,
+              "DESeq2_poscounts"= runDESeq2_poscounts,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2,
+              "edgeR"           = runEdgeR,
+              "edgeR-zinbwave"  = runZinbwaveEdgeR,
+              "limma-voom"      = runVoom,
+              "MAST"            = runMAST,
+              "SCDE"            = runSCDE)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+```
+
+```{r,eval=FALSE}
+library(doParallel)
+library(BiocParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+tt <- lapply(namesAlgos, function(n){
+  timing = system.time(algos[[n]](eLoop))
+  save(timing, file = sprintf('benchmark_%s.rda', n))
+  timing
+})
+```
+
+```{r}
+cpuTime <- lapply(namesAlgos, function(n){
+  load(sprintf('benchmark_%s.rda', n))
+  timing
+})
+```
+
+## Plot
+
+```{r cpu}
+library(ggplot2)
+library(cowplot)
+library(RColorBrewer)
+elapse = sapply(1:length(cpuTime), function(j){
+    cpuTime[[j]][[3]]
+})
+dfTime = data.frame(time = elapse, method = namesAlgos)
+pd <- position_dodge(0.1)
+cpu = ggplot(dfTime, aes(x = factor(method), y = time)) +
+  geom_point(position=pd) + 
+  background_grid(major = 'xy', minor = 'xy') +
+  xlab('Methods') + ylab('CPU time (sec.)') +
+  coord_trans(y = "log10") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = c(3, 5, 10, 25, 50, 100, 250, 500, 1000, 2000))
+cpu
+ggsave(filename="cpu.png", plot = cpu, device = 'png')
+```

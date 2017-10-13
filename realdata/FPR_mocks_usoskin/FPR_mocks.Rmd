@@ -45,7 +45,7 @@ usoskin = exprs(eset)
 expit <- function(x) 1/(1+exp(-x))
 logLib = log(colSums(usoskin))
 pZero = colMeans(usoskin == 0)
-plot(x = logLib, y = pZero, xlab = "Log library size", ylab = "Fraction of zero's",
+plot(x = logLib, y = pZero, xlab = "Log library size", ylab = "Fraction of zeros",
      main = "", cex.lab = 1.5, cex.main = 1.5, bty = "l", pch = 1, cex.axis = 1.5,
      col = as.numeric(pickingSession))
 m = glm(pZero ~ logLib, family = "binomial")
@@ -108,7 +108,9 @@ computeObservationalWeights <- function(zinb, counts){
   nb_part <- dnbinom(t(counts), size = theta, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
   zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
-  t(zinbwg)
+  w <- t(zinbwg)
+  w[counts > 0] <- 1
+  w
 }
 ```
 
@@ -121,20 +123,60 @@ weights_batch = computeObservationalWeights(zinb_batch, assay(se))
 
 ```{r histWeightsUsoskin}
 ylim = c(0, 3e6)
-hist(weights_batch[assay(se) == 0], main = "", cex.lab = 1.5,
-     xlab = "Posterior probability", cex.axis = 1.5, ylim=ylim)
-hist(weights_nobatch[assay(se) == 0], add = TRUE, ylim=ylim,
+hist(weights_batch[assay(se)==0], main = "", cex.lab = 1.5,
+     xlab = "Weight", cex.axis = 1.5, ylim=ylim)
+hist(weights_nobatch[assay(se)==0], add = TRUE, ylim=ylim,
      col = rgb(0.1, 0.8, 0.1, .2))
-legend("topright", c("picking session + eff. lib. size",
-                    "eff. lib. size"),
+legend("topright", c("picking session + cell type",
+                    "cell type"),
        fill = c(0, rgb(0.1, 0.8, 0.1, .2)), bty = "n", cex = 1.25)
 mtext("c", at = -.25, font = 2, cex = 4/3)
 ```
+```{r}
+wb = c(weights_batch[assay(se)==0])
+wob = c(weights_nobatch[assay(se)==0])
+```
+
+```{r ecdfWeightsBatch}
+set.seed(6389)
+n=1e5
+keep = sample(length(wb), n) #sample because R super slow with all the 50,000,000 values
+df = data.frame(Weight = c(wb[keep], wob[keep]),
+                col = c(rep('wb', n), rep('wob', n)))
+df$col = factor(df$col)
+pp = ggplot(df, aes(Weight, colour = col)) + stat_ecdf() +
+  theme_bw() + ylab('ECDF(Weight)')
+pp +
+  scale_colour_manual(name="",
+                      values = c(wb = 'darkgray',
+                                 wob='darkgreen'),
+                      labels = c("picking session + cell type",
+                                 "cell type")) +
+  scale_x_continuous(limits = c(0,1)) +
+  theme(text = element_text(size=20))
+```
+
 ```{r qqplotWeightsBatch}
-qqplot(weights_batch[assay(se) == 0], weights_nobatch[assay(se) == 0],
-       type = 'l', xlab='Posterior Probabilities - Batch', main = '',cex.lab = 1.5,cex.axis= 1.5,
-       ylab='Posterior Probabilities - No Batch')
+qqplot(weights_batch[assay(se)==0],
+       weights_nobatch[assay(se)==0],
+       type = 'l',
+       xlab='Weights - Batch',
+       main = '',cex.lab = 1.5,cex.axis= 1.5,
+       ylab='Weights - No Batch')
 abline(a=0,b=1,col='gray')
+```
+
+```{r mdplotWeightsBatch}
+plotMD <- function(x, y, xlim = c(0,1), ylim = c(-1, 1),
+                   main = ''){
+  mm = .5*(x + y)
+  dd = x - y
+  smoothScatter(mm, dd, xlim = xlim, ylim = ylim, xlab = 'Mean', ylab = 'Difference',
+                main = main)
+  abline(h = 0, col = 'gray')
+}
+plotMD(unlist(weights_batch[assay(se)==0]),
+       unlist(weights_nobatch[assay(se)==0]))
 ```
 
 
@@ -163,7 +205,8 @@ runEdgeR <- function(e) {
 ```{r deseq2}
 runDESeq2_poscounts <- function(e) {
   library(DESeq2)
-  dds <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+  dds <- DESeqDataSetFromMatrix(exprs(e),
+                                colData=DataFrame(pData(e)),
                                 design=~ condition + pickingSession)
   dds <- estimateSizeFactors(dds,type="poscounts")
   dds <- estimateDispersions(dds)
@@ -434,11 +477,11 @@ names(namesAlgos) <- namesAlgos
 nreps <- 30
 ```
 
-```{r}
+```{r,eval=FALSE}
 NCORES <- 2
 registerDoParallel(NCORES)
 register(DoparParam())
-res <- lapply(14:nreps, function(i) {
+res <- lapply(1:nreps, function(i) {
     cat(i," ")
     eLoop <- eset[,as.numeric(subsets[i,])]
     # We remove genes with only zeros as zinbwave needs to remove these genes
@@ -484,26 +527,35 @@ boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
 ```{r fprUsoskin}
-ggplot(boxplotData[!grepl('zingeR', boxplotData$method),],
+boxplotData = boxplotData[!grepl('zingeR', boxplotData$method),]
+ourcol = rep(1, length(unique(boxplotData$method)))
+ourcol[c(4, 6)] = 4 #our methods in blue
+ggplot(boxplotData,
        aes(x=reorder(method,fpr,median),y=fpr)) +
-  geom_boxplot(outlier.colour=rgb(0,0,0,0)) + theme_bw() +
-    geom_point(position = position_jitter(w = 0.1, h = 0),
+  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
+  theme_bw() +
+  geom_point(position = position_jitter(w = 0.1, h = 0),
                color="grey50", size=1) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
-  scale_colour_discrete(guide="none")  + ylab("False Positive Rate") +
+  scale_colour_discrete(guide="none")  + ylab("PCER") +
   geom_hline(aes(yintercept=0.05,colour="red")) +
   theme(text = element_text(size=20))
 ```
 
 ## Histograms of pvalues
 ```{r fprUsoskinPval}
+library(scales)
 keep = !grepl('zingeR', names(res[[1]]))
 idx = 1:length(res[[1]])
 idx = idx[keep]
 par(mfrow=c(3,3))
 hh <- sapply(idx, function(i){
-  hist(res[[1]][[i]]$pvals, main=names(algos)[i], cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5,xlab='p-values',
-       breaks=seq(0,1,by=0.05)) 
+  col = 'white'
+  if (i %in% c(4,7)) col = 'blue'
+  hist(res[[1]][[i]]$pvals, main = names(algos)[i], 
+       cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5,
+       xlab = 'p-values', col = alpha(col,.8),
+       breaks = seq(0, 1, by = 0.05)) 
 })
 par(mfrow=c(1,1))
 ```
