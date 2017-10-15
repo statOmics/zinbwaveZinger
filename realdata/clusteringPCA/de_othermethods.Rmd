@@ -1,0 +1,315 @@
+---
+title: "DE for CD4+ Tcells - clustering on PCA"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(edgeR)
+library(RColorBrewer)
+library(ggplot2)
+source('../../functionsToZinbwavePackage.R')
+```
+
+Using clustering on PCA, we want to compare the different DE methods and perform gene set enrichment analysis.
+
+# Data
+```{r loadobject}
+load("../data/core.rda")
+core = core[,colData(core)$seurat %in% 1:2]
+core = core[rowSums(assay(core)) > 0, ]
+colData(core)$seurat = factor(colData(core)$seurat)
+core
+```
+
+# Compute ZINB-WaVE observational weights
+
+```{r,eval=FALSE}
+#previous epsilon=1e8 but then looked at mocks
+library(doParallel)
+library(BiocParallel)
+NCORES = 2
+registerDoParallel(NCORES)
+register(DoparParam())
+print(system.time(zinb <- zinbFit(core, X = '~ seurat',
+                                  epsilon = 1e12)))
+save(zinb, file = 'zinb.rda')
+```
+
+```{r weightszinb}
+load('zinb.rda')
+counts = assay(core)
+weights_zinbwave = computeObservationalWeights(zinb, counts)
+```
+
+```{r weightszinbZeros}
+hist(weights_zinbwave[assay(core) == 0], main = 'zinbwave',
+     xlab = 'Weights')
+```
+
+```{r}
+design = model.matrix(~ colData(core)$seurat)
+```
+
+# Methods
+## edgeR
+```{r fitedger}
+fit_edgeR <- function(counts, design, filter = NULL){
+  library(edgeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d = estimateDisp(d, design)
+  fit = glmFit(d, design)
+  glm = glmLRT(fit)
+  tab = glm$table
+  tab$padj = p.adjust(tab$PValue, "BH")
+  tab$gene = rownames(tab)
+  de <- as.data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padj', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r edgeR}
+edgeR <- fit_edgeR(counts, design)
+edgeR$method <- 'edgeR'
+```
+
+## zinbwave-weighted edgeR
+```{r fitedgeRzi}
+fit_edgeR_zi <- function(counts, design, weights,
+                         filter = NULL){
+  library(edgeR)
+  d = DGEList(counts)
+  d = suppressWarnings(calcNormFactors(d))
+  d$weights <- weights 
+  d = estimateDisp(d, design)
+  fit = glmFit(d,design)
+  glm = glmWeightedF(fit, filter = filter)
+  tab = glm$table
+  tab$gene = rownames(tab)
+  de <- data.frame(tab, stringsAsFactors = FALSE)
+  de = de[, c('gene', 'PValue', 'padjFilter', 'logFC')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de
+}
+```
+
+```{r edgeRzi}
+nf <- edgeR::calcNormFactors(counts)
+baseMean = unname(rowMeans(sweep(counts,2,nf,FUN="*")))
+zinbwave_edgeR <- fit_edgeR_zi(counts, design, 
+                               weights = weights_zinbwave,
+                               filter = baseMean)
+zinbwave_edgeR$method <- 'zinbwave_edgeR'
+```
+
+## limma-voom
+```{r runlimmavoom}
+runLimmavoom <- function(counts, design) {
+  library(limma)
+  library(edgeR)
+  dgel <- DGEList(counts)
+  dgel <- edgeR::calcNormFactors(dgel)
+  v <- voom(dgel,design,plot=FALSE)
+  fit <- lmFit(v,design)
+  fit <- eBayes(fit)
+  tt <- topTable(fit,coef=2,n=nrow(dgel),sort.by="none")
+  pvals <- tt$P.Value
+  padj <- p.adjust(pvals,method="BH")
+  padj[is.na(padj)] <- 1
+  data.frame(gene = rownames(tt), pval=pvals, padj=padj, logfc=tt$logFC)
+}
+```
+
+```{r limmavoom}
+voom <- runLimmavoom(counts, design)
+voom$method <- 'limmavoom'
+```
+
+# Seurat
+```{r seurat}
+seurat = read.csv('tcellmarkers_seurat.csv')
+seurat$method = 'seurat'
+seurat = seurat[, c('gene', 'p_val', 'p_val_adj',
+                    'avg_logFC', 'method')]
+colnames(seurat) = colnames(edgeR)
+```
+
+# Results
+Let's compare the different methods.
+
+```{r res}
+de = rbind(edgeR, seurat, voom, zinbwave_edgeR)
+write.csv(de, file = 'deGenes.csv', row.names = FALSE)
+```
+
+## GSEA pre ranked
+We use gene set enrichment analysis and xCell gene sets.
+
+```{r}
+library(xCell) # for db
+library(fgsea)
+library(GSEABase)
+
+## extract genesets from xcell
+genesets <- unlist(geneIds(xCell.data$signatures))
+celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
+names(genesets) <- NULL
+gs <- tapply(genesets, celltypes, c)
+de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.005) 
+# MAST creates NAs for log fold change but fgsea does not handle NAs, so I artificially creates small log fold change. rnorm with mean = 0, and not 0 because fgsea does not handle tights.
+set.seed(6372)
+gsea_res = lapply(unique(de$method), function(x){
+  print(x)
+  temp = de[de$method == x, ]
+  degenes = temp$logfc
+  if (x == 'seurat') degenes = - degenes # reverse design matrix in seurat
+  names(degenes) = temp$gene
+  gsea = fgsea(gs, degenes, nperm = 10000, minSize = 5)
+  gsea$method = x
+  gsea[order(-abs(gsea$NES)), ]
+})
+lapply(gsea_res, head)
+```
+
+```{r}
+gseaDf = as.data.frame(do.call(rbind, gsea_res))
+gseaDf = gseaDf[gseaDf$size > 100, ]
+gseaDf = gseaDf[, c('method', 'pathway', 'NES')]
+#gseaDf$method = factor(gseaDf$method, levels = c('edgeR', 'seurat', 'MAST', 'zinbwave_DESeq2', 'limmavoom', 'zinbwave_edgeR'))
+sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
+sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
+gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
+```
+
+```{r tenxcaseNESallPCA}
+ggplot(gseaDf, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient2(low = "blue", high = "red",
+                       mid = "white", midpoint = 0,
+                       space = "Lab", 
+                       name="Normalized\nEnrichment\nScore") +
+  ylab('Cell Type') + xlab('Method')
+```
+
+```{r tenxcaseNEScd4PCA}
+size=20
+chosen = c('CD4+ memory T-cells','CD4+ Tem','CD4+ Tcm','CD4+ naive T-cells')
+sub = gseaDf[gseaDf$pathway %in% chosen, ]
+nes = sub$NES
+limit = max(abs(min(nes)), max(nes))
+sub$pathway = factor(sub$pathway, levels = chosen)
+ggplot(sub, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, space = "Lab",
+                       name="Normalized\nEnrichment\nScore", 
+                       limit = c(-limit, limit)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('Cell Type') + xlab('Method') +
+  theme(text = element_text(size = size))
+```
+
+```{r}
+lapply(gsea_res, function(x){
+  x[x$pathway %in% chosen, ]
+})
+```
+
+
+## Histogram of pvalues
+We are expecting uniformity of the pvalue with a pick close to zero corresponding to DE genes.
+
+```{r tenxcaseHistPvalPCA}
+par(mfrow= c(2,2))
+for (x in unique(de$method)){
+  hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 3000),
+       xlab = 'pvalue')
+}
+par(mfrow= c(1,1))
+```
+
+## Number of DE genes
+```{r}
+for (x in unique(de$method)){
+  print(x)
+  print(sum(de[de$method ==x, 'pval'] < 0.05, na.rm = TRUE))
+  print(sum(de[de$method ==x, 'padj'] < 0.05, na.rm = TRUE))
+}
+```
+
+## Concordance between DE genes
+### Venn diagram
+
+```{r}
+thr = 0.05
+```
+
+DE genes are genes with an adjusted pvalue lower than `r thr`.
+
+```{r venn}
+library(dplyr)
+ve = de %>% group_by(method, gene) %>%
+  summarize(pval = min(pval, na.rm=TRUE)) %>%
+  ungroup() %>% as.data.frame()
+ve$de = ve$pval < thr
+ve = reshape2::acast(ve[, c(1,2,4)], gene ~ method, sum)
+
+aa <- vennCounts(ve)
+vennDiagram(aa, main = 'DE gene, adj pvalue < 0.05')
+```
+
+
+## Most DE genes per method in terms of pvalue
+```{r}
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp$rank = rank(temp$pval)
+  temp
+})
+de = do.call(rbind, ranks)
+
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp = temp[temp$rank < 10, ]
+  temp[order(temp$rank), ]
+})
+names(ranks) = unique(de$method)
+ranks
+```
+
+## Most DE genes per method in terms of fold change
+```{r}
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp$rank = rank(-abs(temp$logfc))
+  temp
+})
+de = do.call(rbind, ranks)
+
+ranks = lapply(unique(de$method), function(x){
+  temp = de[de$method == x, ]
+  temp = temp[temp$rank < 10, ]
+  temp[order(temp$rank), ]
+})
+names(ranks) = unique(de$method)
+ranks
+```
+
+
+#sessionInfo
+```{r}
+sessionInfo()
+```

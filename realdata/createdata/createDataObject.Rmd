@@ -15,6 +15,8 @@ knitr::opts_chunk$set(
 )
 ```
 
+File downloaded from: http://satijalab.org/seurat/pbmc3k_tutorial.html. We thank the Seurat team for providing such a clear and detailed tutorial. We only modified the end of the file to save clusters when `resolution = 0.8`. Additionally, we save the data set as a singleCellExperiment object.
+
 ### Setup the Seurat Object
 
 For this tutorial, we will be analyzing the a dataset of Peripheral Blood Mononuclear Cells (PBMC) freely available from 10X Genomics. There are 2,700 single cells that were sequenced on the Illumina NextSeq 500. The raw data can be found [here](https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz).
@@ -26,7 +28,7 @@ library(dplyr)
 library(Matrix)
 
 # Load the PBMC dataset
-pbmc.data <- Read10X(data.dir = "../../data/filtered_gene_bc_matrices/hg19/")
+pbmc.data <- Read10X(data.dir = "../data/filtered_gene_bc_matrices/hg19/")
 
 # Examine the memory savings between regular and sparse matrices
 dense.size <- object.size(x = as.matrix(x = pbmc.data))
@@ -142,8 +144,9 @@ pbmc <- ProjectPCA(object = pbmc, do.print = FALSE)
 
 In particular `PCHeatmap` allows for easy exploration of the primary sources of heterogeneity in a dataset, and can be useful when trying to decide which PCs to include for further downstream analyses. Both cells and genes are ordered according to their PCA scores. Setting cells.use to a number plots the 'extreme' cells on both ends of the spectrum, which dramatically speeds plotting for large datasets. Though clearly a supervised analysis, we find this to be a valuable tool for exploring correlated gene sets.
 
-```{r single-heatmap, warning=FALSE}
-PCHeatmap(object = pbmc, pc.use = 1, cells.use = 500, do.balanced = TRUE, label.columns = FALSE)
+```{r single-heatmap, warning=FALSE,fig.height=12, fig.width=9}
+PCHeatmap(object = pbmc, pc.use = 1, cells.use = 500, 
+          do.balanced = TRUE, label.columns = FALSE)
 ```
 
 ```{r multi-heatmap, fig.height=12, fig.width=9, warning=FALSE}
@@ -239,7 +242,7 @@ cluster5.markers <- FindMarkers(object = pbmc, ident.1 = 5, ident.2 = c(0,3), mi
 print(x = head(x = cluster5.markers, n = 5))
 # find markers for every cluster compared to all remaining cells, report only the positive ones
 pbmc.markers <- FindAllMarkers(object = pbmc, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
-pbmc.markers %>% group_by(cluster) %>% top_n(2, avg_diff)
+pbmc.markers %>% group_by(cluster) %>% top_n(2)
 ```
 
 Seurat has four tests for differential expression which can be set with the test.use parameter: ROC test ("roc"), t-test ("t"), LRT test based on zero-inflated data ("bimod", default), LRT test based on tobit-censoring models ("tobit") The ROC test returns the 'classification power' for any individual marker (ranging from 0 - random, to 1 - perfect).
@@ -262,7 +265,7 @@ FeaturePlot(object = pbmc, features.plot = c("MS4A1", "GNLY", "CD3E", "CD14", "F
 `DoHeatmap` generates an expression heatmap for given cells and genes. In this case, we are plotting the top 20 markers (or all markers if less than 20) for each cluster.
 
 ```{r clusterHeatmap, fig.height=8, fig.width=15, message=FALSE, warning=FALSE}
-pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_diff) -> top10
+pbmc.markers %>% group_by(cluster) %>% top_n(10) -> top10
 # setting slim.col.label to TRUE will print just the cluster IDS instead of every cell name
 DoHeatmap(object = pbmc, genes.use = top10$gene, slim.col.label = TRUE, remove.key = TRUE)
 ```
@@ -320,5 +323,41 @@ FeaturePlot(object = pbmc, features.plot = c("S100A4", "CCR7"), cols.use = c("gr
 The memory/naive split is bit weak, and we would probably benefit from looking at more cells to see if this becomes more convincing. In the meantime, we can restore our old cluster identities for downstream processing.
 
 ```{r restore}
-save(pbmc, file = "pbmc3k_subCD4.Rda")
+save(pbmc, file = "../data/pbmc3k.rda")
+```
+
+# Create SE object
+```{r}
+library(SingleCellExperiment)
+# use raw data as input for zinbwave but keep only non filtered cells
+# and most variable genes indentified by seurat
+keepcells = colnames(pbmc@data)
+counts = pbmc@raw.data[, keepcells]
+# zinbwave does not want dgTMatrix as input
+counts = as.matrix(counts)
+counts = counts[rowSums(counts) > 0, ]
+
+#keepcells = as.integer(pbmc@ident) %in% 1:2
+#counts = counts[, keepcells]
+
+# coldata
+clusters = as.integer(pbmc@ident)
+#clusters = clusters[clusters %in% 1:2]
+
+cData = data.frame(seurat = clusters)
+rownames(cData) = colnames(counts)
+
+# rowdata
+rData = data.frame(seuratVarGenes = rownames(counts) %in% pbmc@var.genes)
+rownames(rData) = rownames(counts)
+
+# create sce object
+core = SingleCellExperiment(assays = list(counts = counts),
+                            colData = cData, rowData = rData)
+core
+```
+
+```{r save}
+unloadNamespace("Seurat")
+save(core, file = '../data/core.rda')
 ```

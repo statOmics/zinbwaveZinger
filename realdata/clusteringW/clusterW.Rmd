@@ -24,7 +24,7 @@ We want to perform clustering on dimensionality reduced matrix W estimated using
 # Data
 ```{r}
 # SingleCellExperiment object
-load("../core.rda")
+load("../data/core.rda")
 core = core[rowSums(assay(core)) > 0, ]
 colData(core)$seurat = factor(colData(core)$seurat)
 core = core[rowData(core)$seuratVarGenes, ]
@@ -32,12 +32,12 @@ dim(core)
 
 # zinb 
 # tried K=25 as well
-load('zinb_k25.rda')
+load('zinb_k20.rda')
 W = getW(zinb)
 dim(W)
 
 # seurat object
-load('../pbmc3k_subCD4.Rda')
+load('../data/pbmc3k.rda')
 pbmc
 seurat_clus <- pbmc@ident
 names(seurat_clus) <- paste0(names(pbmc@ident), "-1")
@@ -194,9 +194,10 @@ p4 + labs(color='Clustering with PCA') +
 tcell.markers <- FindMarkers(object = pbmc,
                              ident.1 = 0,
                              ident.2 = 5,
+                             logfc.threshold = 0,
                              genes.use = rownames(pbmc@raw.data),
                              thresh.use = 0,
-                             test.use = "bimod",
+                             test.use = "wilcox",
                              min.pct = 0, 
                              min.diff.pct = -Inf,
                              print.bar = TRUE,
@@ -219,10 +220,10 @@ topgenes
 ```
 
 ```{r}
-FeaturePlot(object = pbmc, features.plot = c("NKG7", "S100A4"),
+FeaturePlot(object = pbmc,
+            features.plot = c("NKG7", "S100A4"), 
             cols.use = c("green", "blue"))
 ```
-
 
 ```{r}
 write.csv(tcell.markers, file = 'tcellmarkers_seurat.csv')
