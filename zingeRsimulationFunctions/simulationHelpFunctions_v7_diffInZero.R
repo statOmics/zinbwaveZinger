@@ -240,8 +240,10 @@ library(mgcv)
 
 
 getExprFraction4 = function(counts, offset){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
+    #countsModel = counts[counts>0]
+    #offsetModel = offset[counts>0]
+    countsModel = counts
+    offsetModel = offset
   sum(countsModel)/sum(offsetModel)
 }
 
@@ -253,8 +255,10 @@ getExprFraction4 = function(counts, offset){
 # }
 
 getPhiMoMPositive4 = function(counts, lambda, offset){
-    countsModel = counts[counts>0]
-    offsetModel = offset[counts>0]
+    #countsModel = counts[counts>0]
+    #offsetModel = offset[counts>0]
+    countsModel = counts
+    offsetModel = offset
     mu=lambda*offsetModel
     phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
     return(phi)
@@ -288,7 +292,7 @@ reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
 
 getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "AveLogCPM", MoMIter=10){
 
-        #### estimate lambda and overdispersion based on ZTNB.
+  #### estimate lambda and overdispersion based on ZTNB.
 	d <- DGEList(counts)
 	cp <- cpm(d,normalized.lib.sizes=TRUE)
 	dFiltered=d
@@ -298,16 +302,17 @@ getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "
   lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction4(counts=x, offset=colSums(dFiltered$counts)))
   dispMoM = vector(length=nrow(dFiltered$counts))
   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
-  dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
+  #dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
+  dispMoM[dispMoM<0] = 1e-3
 
-  ### old code: iteratively estimating
+   ## iterative estimation.
    for(j in 1:MoMIter){
     message(paste0("iteration ",j," in ",MoMIter))
    for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
    for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
-  dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
+   #dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion to re-initialize
+   dispMoM[dispMoM<0] = 1e-3 #set negative dispersions very low => Poisson-like.
    }
-  ### end old code
 
   ## assume convergence
   params=cbind(dispMoM,lambdaMoM)
@@ -318,7 +323,7 @@ getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "
 	throwRows = c(rmRows,rmRows2,naRows,nonZeroDispRows)
   if(length(throwRows)>0) params = params[-throwRows,]
 
-	### estimate logistic GAM P(zero) ~ s(aveLogCPM) + logLibSize
+	### estimate logistic GAM P(zero) ~ s(aveLogCPM)*logLibSize
 	### use unfiltered data for this model.
   require(mgcv)
 	propZero = colMeans(counts==0)

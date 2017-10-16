@@ -2,8 +2,8 @@
 title: "Impact of the ridge penalty on the performance (TPR and FDP)"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
-output: 
-  html_document: 
+output:
+  html_document:
     fig_height: 7
     fig_width: 7
     toc: yes
@@ -22,7 +22,9 @@ library(iCOBRA) # roc
 library(genefilter) #filtered pvalues
 library(RColorBrewer)
 library(ggplot2)
-library(wesanderson)
+#library(wesanderson)
+pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
 ```
 
 ```{r}
@@ -31,20 +33,14 @@ registerDoParallel(NCORES)
 register(DoparParam())
 ```
 
-We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R  
+We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R
 
-TODO: check with Koen if it's ok, fit of simulated to real data not perfect.
-
-```{r}
-source('../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R')
-```
 
 ```{r data}
 data(islamEset, package = "zingeR")
 islamHlp=exprs(islamEset)[9:2008,] #first 8 are spike-ins.
 cellType=pData(islamEset)[,"cellType"]
-paramsIslam = getDatasetZTNB(counts = islamHlp, 
-                             design = model.matrix(~ cellType))
+paramsIslam = getDatasetMoMPositive(counts = islamHlp)
 ```
 
 ```{r sims}
@@ -103,7 +99,7 @@ computeZinbwaveWeights <- function(zinb, counts){
   theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
   nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
   t(zinbwg)
 }
 ```
@@ -130,7 +126,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeZinbwaveWeights(zinb, counts)
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -140,6 +136,19 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 }
 ```
 
+```{r checkWeightsWithMike}
+# getModelMatrix <- function(object) {
+#   stats::model.matrix.default(design(object), data=as.data.frame(colData(object)))
+# }
+#
+# modelMatrix = getModelMatrix(dse)
+# m <- ncol(modelMatrix)
+#
+# weights.ok <- logical(nrow(weights))
+# for (i in seq_len(nrow(weights))) {
+#     weights.ok[i] <- qr(weights[i,] * modelMatrix, tol=1e-16)$rank == m
+# }
+```
 
 ```{r core}
 core <- SummarizedExperiment(simDataIslam$counts,
@@ -147,7 +156,7 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-epsVec = c(1e-6, 10^-4, 10^-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10)
+epsVec = c(1e-4, 1e-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10, 1e12)
 zinbList <- lapply(epsVec, function(eps){
   print(eps)
   zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = eps)
@@ -167,6 +176,12 @@ resList = lapply(zinbList, function(zinb){
   zinbwave_edgeR(counts, grp, zinb)
 })
 par(mfrow = c(1, 1))
+
+
+resListDESeq = lapply(zinbList, function(zinb){
+  zinbwave_DESeq2(counts, grp, zinb)
+})
+
 ```
 
 ## pval histograms
@@ -192,7 +207,7 @@ par(mfrow = c(3, 3))
 volcanos <- lapply(1:length(res), function(i){
   plot(res[[i]][, 'logFC'], -log10(res[[i]][, 'padj']),
        pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 15),
-       ylab = '-log10(pvalue)', xlab = 'logFC', 
+       ylab = '-log10(pvalue)', xlab = 'logFC',
        main = paste0('epsilon=',names(res)[i]))
   points(res[[i]][simDataIslam$indDE, 'logFC'], pch=1, col=3, cex=.5, lwd=1,
           -log10(res[[i]][simDataIslam$indDE, 'padj']))
@@ -224,8 +239,7 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = 'Set1')
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
-                 linewidth = .5)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1, linewidth = .5)
 ```
 
 ```{r}
@@ -245,4 +259,3 @@ par(mfrow=c(3,3))
 hh = lapply(weightsList, hist)
 par(mfrow=c(1,1))
 ```
-

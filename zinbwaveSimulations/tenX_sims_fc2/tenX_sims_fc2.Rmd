@@ -126,24 +126,19 @@ cellType = cl[cl %in% 2:3]
 Input count matrix for zinbwave should not have genes with only zero counts. Let's remove these genes right away.
 
 ```{r}
-counts <- counts[rowSums(counts) > 0, ]
-counts <- counts[rowSums(counts != 0) > 5, ]
+counts <- counts[rowSums(counts != 0) > 20, ] #expression in at least 1/60 cells
 dim(counts)
 tenXData = counts
 ```
+
+
+## simulation framework
 
 ```{r}
 paramsTenx = getDatasetMoMPositive(counts = tenXData)
 ```
 
-
-## Updated simulation framework
-
-
-Fit between simulated and real dataset is not great, but Koen is working on new simulation framework.
-
 ```{r sims}
-
 nSamples=ncol(tenXData)
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=10000 #nr of features
@@ -155,7 +150,7 @@ simData <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                            dataset = tenXData, nTags = nTags,
                            group = grp,
                            verbose = TRUE, params = paramsTenx,
-                           lib.size = libSizes, cpm="AveLogCPM", normalizeLambda=TRUE)
+                           lib.size = libSizes, cpm="AveLogCPM", normalizeLambda=TRUE, min.dispersion=1e-3)
 simData$counts[1:5,1:5]
 ```
 
@@ -290,7 +285,7 @@ zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
   d <- DGEList(counts)
   d <- suppressWarnings(edgeR::calcNormFactors(d))
   design <- model.matrix(~ group)
-  weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 100, normalization = "TMM", verbose = TRUE, plotW=TRUE)
+  weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 500, normalization = "TMM", verbose = TRUE, plotW=FALSE)
   d$weights <- weights
   d <- estimateDisp(d, design)
   plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
@@ -329,7 +324,7 @@ zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main =
   d=DGEList(counts)
   d=suppressWarnings(calcNormFactors(d))
   design=model.matrix(~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeZinbwaveWeights(zinb, counts)
   weights[weights==0] = 1e-15 #errors with zero weights
   d$weights <- weights
   d=estimateDisp(d, design)
@@ -346,7 +341,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeZinbwaveWeights(zinb, counts)
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -361,7 +356,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 zinbwave_limma <- function(counts, group, zinb){
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- computeZinbwaveWeights(zinb, d$counts)
+  zeroWeights <- computeZinbwaveWeights(zinb, counts)
   y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
             weights = zeroWeights)
   y$weights <- y$weights * zeroWeights
@@ -385,29 +380,29 @@ core <- SummarizedExperiment(simData$counts,
 ```
 
 ```{r zinbcommondisp}
-zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
 #save(zinb_c, file = 'zinb-common-disp-fc2.rda')
 #load('zinb-common-disp-fc2.rda')
 
-epsValues = c(1e8, 1e10, 1e12, 1e14)
-name=as.character(c(8, 10,12,14))
-for(i in 1:3){
-  assign(paste0("zinb_c_eps",name[i]), zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=epsValues[i]))
-}
+# epsValues = c(1e8, 1e10, 1e12, 1e14)
+# name=as.character(c(8, 10,12,14))
+# for(i in 1:3){
+#   assign(paste0("zinb_c_eps",name[i]), zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=epsValues[i]))
+# }
 
 
 ```
 
 ```{r zinbgenewisedisp}
-zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
-save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
-load('zinb-genewise-disp-fc2.rda')
+# zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
+# save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
+# load('zinb-genewise-disp-fc2.rda')
 ```
 
 # Compare dispersion estimates
 ```{r tenxDispFC2, warning=FALSE}
 counts = simData$counts
-myfct = list(#DESeq2 = DESeq2,
+myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma
              #MAST = MAST
@@ -526,7 +521,34 @@ plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
         axis.text.y = element_text(size = 10),
         axis.title.x = element_text(size = 15),
         axis.title.y = element_text(size = 15))
+
+
+
+
+
+##### TEMP
+pp = COBRAData(pval = data.frame(edgeR=edgeResNewNotNorm[,"pval"],
+        zinbwaveEdgeRes = zinwaveEdgeResNewNotNorm[,"pval"],
+        #zinger_edger=hlp[,"pval"],
+        row.names=rownames(simData$counts)),
+               padj = data.frame(edgeR=edgeResNewNotNorm[,"padj"], zinbwaveEdgeRes = zinwaveEdgeResNewNotNorm[,"padj"], #zinger_edger=hlp[,"padj"],
+                row.names=rownames(simData$counts)),
+               truth = data.frame(status = trueDE, logMean = round(log(rowMeans(simData$counts)),2),
+                simDisp = simData$Dispersion[,1],
+                row.names=rownames(simData$counts)))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05, splv="logMean", maxsplit=3)
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = "Paired")
+plot_fdrtprcurve(cobraplot, pointsize=1)
+####
+
+
 ```
+
+
+
+
+
+
 
 ```{r tenxROCfc2}
 #res10 = res[1:10]

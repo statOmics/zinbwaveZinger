@@ -1,9 +1,9 @@
 ---
 title: "Impact of the ridge penalty on the performance (TPR and FDP)"
-author: "Fanny Perraudeau"
+author: "Fanny Perraudeau & Koen Van den Berge"
 date: "`r Sys.Date()`"
-output: 
-  html_document: 
+output:
+  html_document:
     fig_height: 7
     fig_width: 7
     toc: yes
@@ -22,7 +22,10 @@ library(iCOBRA) # roc
 library(genefilter) #filtered pvalues
 library(RColorBrewer)
 library(ggplot2)
-library(wesanderson)
+#library(wesanderson)
+#library(wesanderson)
+pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
 ```
 
 ```{r}
@@ -31,20 +34,15 @@ registerDoParallel(NCORES)
 register(DoparParam())
 ```
 
-We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R  
+We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R
 
-TODO: check with Koen if it's ok, fit of simulated to real data not perfect.
 
-```{r}
-source('../../zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R')
-```
 
 ```{r data}
 data(islamEset, package = "zingeR")
-islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
+islamHlp=exprs(islamEset)[-c(1:8),] #first 8 are spike-ins.
 cellType=pData(islamEset)[,"cellType"]
-paramsIslam = getDatasetZTNB(counts = islamHlp, 
-                             design = model.matrix(~ cellType))
+paramsIslam = getDatasetMoMPositive(counts = islamHlp)
 ```
 
 ```{r sims}
@@ -103,7 +101,7 @@ computeZinbwaveWeights <- function(zinb, counts){
   theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
   nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
   zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part 
+  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
   t(zinbwg)
 }
 ```
@@ -130,7 +128,8 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeZinbwaveWeights(zinb, counts)
+  #weights[weights<1e-6]=1e-6 #temporary fix.
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -147,11 +146,11 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```
 
 ```{r zinbcommondisp}
-epsVec = c(1e-6, 10^-4, 10^-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10)
-zinbList <- lapply(epsVec, function(eps){
-  print(eps)
-  zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = eps)
-})
+epsVec = c(10^-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10, 1e12, 1e14)
+# zinbList <- lapply(epsVec, function(eps){
+#   print(eps)
+#   zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = eps)
+# })
 ```
 
 # Results
@@ -162,23 +161,44 @@ zinbList <- lapply(epsVec, function(eps){
 counts = simDataIslam$counts
 group = grp
 
-par(mfrow = c(3, 3))
-resList = lapply(zinbList, function(zinb){
-  zinbwave_edgeR(counts, grp, zinb)
-})
-par(mfrow = c(1, 1))
+# par(mfrow = c(3, 3))
+# resList = lapply(zinbList, function(zinb){
+#   zinbwave_edgeR(counts, grp, zinb)
+# })
+# par(mfrow = c(1, 1))
+# save(resList,file="resListEdgerIslam.rda")
+#
+# resListDESeq2 = lapply(zinbList, function(zinb){
+#   zinbwave_DESeq2(counts, grp, zinb)
+# })
+# save(resListDESeq2,file="resListDESeq2Islam.rda")
+
+load("~/resListEdgerIslam.rda")
+load("~/resListDESeq2Islam.rda")
+
 ```
 
 ## pval histograms
 ```{r}
 res = lapply(resList, as.data.frame)
 names(res) = as.character(epsVec)
+
+resDESeq =  lapply(resListDESeq2, as.data.frame)
+names(resDESeq) = as.character(epsVec)
 ```
 
 ```{r histogramPVAL}
+## edgeR
 par(mfrow = c(3, 3))
 hist = lapply(1:length(res), function(i){
-  hist(res[[i]][,'pval'], main = paste0('epsilon=', names(res)[i]))
+  hist(res[[i]][,'pval'], main = paste0('epsilon=', names(res)[i]), xlab="p-value", breaks=seq(0,1,0.05))
+})
+par(mfrow = c(1, 1))
+
+## DESeq2
+par(mfrow = c(3, 3))
+hist = lapply(1:length(resDESeq), function(i){
+  hist(resDESeq[[i]][,'pval'], main = paste0('epsilon=', names(resDESeq)[i]), xlab="p-value", breaks=seq(0,1,0.05))
 })
 par(mfrow = c(1, 1))
 ```
@@ -192,23 +212,48 @@ par(mfrow = c(3, 3))
 volcanos <- lapply(1:length(res), function(i){
   plot(res[[i]][, 'logFC'], -log10(res[[i]][, 'padj']),
        pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 15),
-       ylab = '-log10(pvalue)', xlab = 'logFC', 
+       ylab = '-log10(pvalue)', xlab = 'logFC',
        main = paste0('epsilon=',names(res)[i]))
   points(res[[i]][simDataIslam$indDE, 'logFC'], pch=1, col=3, cex=.5, lwd=1,
           -log10(res[[i]][simDataIslam$indDE, 'padj']))
 })
 par(mfrow = c(1, 1))
+
+par(mfrow = c(3, 3))
+volcanos <- lapply(1:length(resDESeq), function(i){
+  plot(resDESeq[[i]][, 'logFC'], -log10(resDESeq[[i]][, 'padj']),
+       pch = 20, col = 'gray', cex = .5, xlim = c(-10, 10), ylim = c(0, 15),
+       ylab = '-log10(pvalue)', xlab = 'logFC',
+       main = paste0('epsilon=',names(resDESeq)[i]))
+  points(resDESeq[[i]][simDataIslam$indDE, 'logFC'], pch=1, col=3, cex=.5, lwd=1,
+          -log10(resDESeq[[i]][simDataIslam$indDE, 'padj']))
+})
+par(mfrow = c(1, 1))
+
 ```
 
 ```{r}
 lapply(resList, function(x){
   sum(is.na(x[, 'padj']))
 })
+lapply(resListDESeq2, function(x){
+  sum(is.na(x[, 'padj']))
+})
 ```
 
 ## nDE, TPR, FDR at pval=0.05
 ```{r nb}
+#edgeR
 tab_de = lapply(res, function(y){
+  nDE = sum(y$padj <= 0.05, na.rm = TRUE)
+  TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
+  FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
+  c(nDE = nDE, TPR = TPR, FPR = FPR)
+})
+do.call(rbind, tab_de)
+
+#DESeq2
+tab_de = lapply(resDESeq, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
   TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
   FPR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
@@ -224,25 +269,20 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplot <- prepare_data_for_plot(cobraperf)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
-                 linewidth = .5)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5)
+
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 2))),
+               truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplotDESeq <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5)
 ```
 
 ```{r}
-cobraplot <- prepare_data_for_plot(cobraperf)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1,
-                 xaxisrange = c(0, 0.2),linewidth = .5)
-```
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5)
 
-## Weights
+plot_fdrtprcurve(cobraplotDESeq, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5)
 
-```{r}
-weightsList <- lapply(zinbList, function(zinb){
-  computeZinbwaveWeights(zinb, counts)
-})
-
-par(mfrow=c(3,3))
-hh = lapply(weightsList, hist)
-par(mfrow=c(1,1))
 ```
 

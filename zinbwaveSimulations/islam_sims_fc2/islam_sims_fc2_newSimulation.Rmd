@@ -18,8 +18,6 @@ knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE
 library(zinbwave)
 library(BiocParallel)
 library(doParallel)
-library(gamlss)
-library(gamlss.tr)
 library(Biobase)
 library(edgeR)
 library(scales)
@@ -35,7 +33,8 @@ library(cowplot)
 # use new simulation.
 #library(zingeR)
 pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
-source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))```
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
+```
 
 
 ```{r cores}
@@ -83,7 +82,7 @@ simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islamHlp, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes)
+                                lib.size = libSizes, normalizeLambda=TRUE)
 simDataIslam$counts[1:5,1:5]
 
 # BCV plots
@@ -184,8 +183,8 @@ scde <- function(counts, group, ylim=NULL, xlim=NULL){
 
 ```
 
-
 ### MAST
+
 ```{r MAST}
 ### copied code from FPR_mocks.Rmd on September 14, 2017.
 MAST <- function(counts, group, ylim = NULL, xlim = NULL){
@@ -230,7 +229,57 @@ MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   return(out)
 }
 
+```
 
+### NODES
+
+```{r}
+NODES <- function(counts, group, xlim, ylim){
+  require(NODES)
+  g=ifelse(group==0,"A","B")
+  colnames(counts)=g
+  normCounts=pQ(counts)
+  res=NODES::NODES(data=normCounts,group=colnames(normCounts))
+  pval=vector(length=nrow(counts))
+  names(pval)=rownames(counts)
+  pval[rownames(normCounts)]=res$Fisher
+  pval[is.na(pval)]=1
+  padj=p.adjust(pval,"BH")
+  lfc=NA
+  out=cbind(pval,padj,lfc)
+  return(out)
+}
+```
+
+### metagenomeSeq
+
+```{r metagenomeSeq}
+metagenomeSeq <- function(counts, group, xlim, ylim){
+  require(metagenomeSeq)
+  design <- model.matrix(~group)
+  pheno <- AnnotatedDataFrame(data.frame(group=group))
+  rownames(pheno) <- colnames(counts)
+  p <- cumNormStatFast(counts)
+  dat <- newMRexperiment(counts=counts, phenoData=pheno, featureData = NULL, libSize = colSums(counts), normFactors = metagenomeSeq::calcNormFactors(counts, p=p))
+  fit <- fitZig(dat,design)
+  lfc <- fit$eb$coefficients[,"group1"]
+  pval <- fit$eb$p.value[,"group1"]
+  padj <- p.adjust(pval)
+  out <- cbind(pval,padj,lfc)
+  return(out)
+}
+```
+
+```{r seurat}
+Seurat <- function(counts, group, xlim=NULL, ylim=NULL){
+    require(Seurat)
+    seur = CreateSeuratObject(counts, project=paste0("cell",as.character(group)), display.progress = FALSE)
+    res <- FindMarkers(seur, ident.1 = "cell0", ident.2 = "cell1", print.bar=FALSE)
+    pval = res$p_val[match(rownames(counts),rownames(res))]
+    padj = p.adjust(pval,"BH")
+    out=cbind(pval,padj)
+    return(out)
+}
 ```
 
 ## zingeR
@@ -379,26 +428,28 @@ core <- SummarizedExperiment(simDataIslam$counts,
 ```{r zinbcommondisp}
 #zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
 #save(zinb_c, file = 'zinb-common-disp-fc2-eps12.rda')
-load('zinb-common-disp-fc2-eps12.rda')
+load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/zinb-common-disp-fc2-eps12.rda')
 ```
 
 ```{r zinbgenewisedisp}
-zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE, epsilon=1e12)
+#zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE, epsilon=1e12)
 #save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
-load('zinb-genewise-disp-fc2.rda')
+load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/zinb-genewise-disp-fc2.rda')
 ```
 
 # Compare dispersion estimates
 ```{r islamDispFC2, warning=FALSE}
 counts = simDataIslam$counts
+R.utils::gcDLLs()
 myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma,
              MAST = MAST,
+             NODES = NODES,
              scde = scde,
-             zingeR_DESeq2 = zingeR_DESeq2,
-             zingeR_edgeR = zingeR_edgeR,
-             zingeR_limmavoom = zingeR_limma)
+             metagenomeSeq = metagenomeSeq)
+             #Seurat = Seurat)
+
 
 par(mfrow = c(2,2))
 ylim = c(0, 11)
@@ -413,11 +464,6 @@ res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 
-
-res[['ZINB-WaVE_edgeR_common12']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
-res[['ZINB-WaVE_DESeq2_common12']] = zinbwave_DESeq2(counts, grp, zinb_c)
-
-
 par(mfrow = c(1,1))
 ```
 
@@ -429,7 +475,7 @@ for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 
 ## Compare weights estimates
 
-```{r zingerEdgerWeights}
+<!-- ```{r zingerEdgerWeights}
 d=DGEList(simDataIslam$counts)
 d=suppressWarnings(calcNormFactors(d))
 design=model.matrix(~grp)
@@ -443,7 +489,7 @@ design <- model.matrix(~ grp)
 zingeR_DESeq2_weights <- zeroWeightsLS(counts = counts, design = design,
                            normalization = "DESeq2_poscounts", colData = colData,
                            designFormula = ~grp, verbose = F)
-```
+``` -->
 
 ```{r zinbwaveW}
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
@@ -451,9 +497,9 @@ zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
 ```
 
 ```{r islamWeightsFC2}
-par(mfrow=c(2,2))
-hist(zingeR_edgeR_weights, main='zingeR_edgeR', xlab = 'Weights')
-hist(zingeR_DESeq2_weights, main='zingeR_DESeq2', xlab = 'Weights')
+par(mfrow=c(1,2))
+#hist(zingeR_edgeR_weights, main='zingeR_edgeR', xlab = 'Weights')
+#hist(zingeR_DESeq2_weights, main='zingeR_DESeq2', xlab = 'Weights')
 hist(zinbwave_c_weights, main ='ZINB-WaVE, common dispersion', xlab = 'Weights')
 hist(zinbwave_g_weights, main ='ZINB-WaVE, genewise dispersion', xlab = 'Weights')
 par(mfrow=c(1,1))
@@ -496,66 +542,90 @@ trueDE[simDataIslam$indDE] = 1
 ```
 
 ```{r islamROCfc2zinbwave}
-reszinb = res[c('ZINB-WaVE_DESeq2_common', 'ZINB-WaVE_edgeR_common',
-                 'ZINB-WaVE_limmavoom_common', 'ZINB-WaVE_DESeq2_genewise',
-                 'ZINB-WaVE_edgeR_genewise', 'ZINB-WaVE_limmavoom_genewise')]
-
-pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 1))),
-               padj = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 2))),
-               truth = data.frame(status = trueDE))
-cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = "Paired",
-                                   facetted = FALSE)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
-                 pointsize = .2, linewidth = .5, xaxisrange = c(0, .5)) +
-  scale_color_manual(labels = sort(names(reszinb)), values = brewer.pal(6, "Paired"),
-                     name = 'Method') + theme(legend.text=element_text(size=7)) +
-  theme(axis.text.x = element_text(size = 10),
-        axis.text.y = element_text(size = 10),
-        axis.title.x = element_text(size = 15),
-        axis.title.y = element_text(size = 15))
+# reszinb = res[c('ZINB-WaVE_DESeq2_common', 'ZINB-WaVE_edgeR_common',
+#                  'ZINB-WaVE_limmavoom_common', 'ZINB-WaVE_DESeq2_genewise',
+#                  'ZINB-WaVE_edgeR_genewise', 'ZINB-WaVE_limmavoom_genewise')]
+#
+# pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 1))),
+#                padj = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 2))),
+#                truth = data.frame(status = trueDE))
+# cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+# cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = "Paired",
+#                                    facetted = FALSE)
+# plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
+#                  pointsize = .2, linewidth = .5, xaxisrange = c(0, .5)) +
+#   scale_color_manual(labels = sort(names(reszinb)), values = brewer.pal(6, "Paired"),
+#                      name = 'Method') + theme(legend.text=element_text(size=7)) +
+#   theme(axis.text.x = element_text(size = 10),
+#         axis.text.y = element_text(size = 10),
+#         axis.title.x = element_text(size = 15),
+#         axis.title.y = element_text(size = 15))
 ```
 
 ```{r islamROCfc2}
-res10 = res[1:10]
-names(res10) = gsub('_common', '', names(res10))
-pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res10, '[[', 1))),
-               padj = as.data.frame(do.call(cbind, lapply(res10, '[[', 2))),
-               truth = data.frame(status = trueDE))
+#all methods
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
+                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplot <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, pointsize=1)
 
-reds = brewer.pal(11, "RdYlGn")[1:3]
-blues = rev(brewer.pal(11, "RdYlBu"))[1:3]
-brown =  brewer.pal(8, "Dark2")[4]
-greens = rev(brewer.pal(11, "PiYG"))[1:3]
-mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
-          blues[3], greens[3], reds[3], 'black')
-names(mycol) = c(names(res10), 'truth')
-names(cobraperf@overlap) = names(mycol)
-colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
-cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
-                                   facetted = FALSE)
+#only common disp ZINB-WaVE
+pvalDf = as.data.frame(do.call(cbind, lapply(res, '[[', 1)))
+padjDf = as.data.frame(do.call(cbind, lapply(res, '[[', 2)))
+pp = COBRAData(pval = pvalDf[,-grep(x=colnames(pvalDf), pattern="genewise")],
+               padj = padjDf[,-grep(x=colnames(padjDf), pattern="genewise")],
+                truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplot <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, pointsize=1)
 
-p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
-                       linewidth = .5, xaxisrange = c(0, .5)) +
-  theme(axis.text.x = element_text(size = 10),
-        axis.text.y = element_text(size = 10),
-        axis.title.x = element_text(size = 15),
-        axis.title.y = element_text(size = 15),
-        legend.text=element_text(size=7)) + theme(legend.position="none")
 
-orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
-p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
-                       linewidth = .5, xaxisrange = c(0, .5)) +
-  theme(legend.text=element_text(size=7)) +
-  scale_color_manual(labels = names(colsCobra)[orderLegend],
-                     values = unname(colsCobra)[orderLegend],
-                     name = 'Method')
-legend <- get_legend(p2)
 
-#pdf("../../draftOverleaf/10963157vrrwqjqjdrnf/performanceIslamfc2.pdf")
-plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
-#dev.off()
+
+# res10 = res[1:10]
+# names(res10) = gsub('_common', '', names(res10))
+# pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res10, '[[', 1))),
+#                padj = as.data.frame(do.call(cbind, lapply(res10, '[[', 2))),
+#                truth = data.frame(status = trueDE))
+# cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+#
+# reds = brewer.pal(11, "RdYlGn")[1:3]
+# blues = rev(brewer.pal(11, "RdYlBu"))[1:3]
+# brown =  brewer.pal(8, "Dark2")[4]
+# greens = rev(brewer.pal(11, "PiYG"))[1:3]
+# mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
+#           blues[3], greens[3], reds[3], 'black')
+# names(mycol) = c(names(res10), 'truth')
+# names(cobraperf@overlap) = names(mycol)
+# colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
+# cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
+#                                    facetted = FALSE)
+#
+# p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
+#                        linewidth = .5, xaxisrange = c(0, .5)) +
+#   theme(axis.text.x = element_text(size = 10),
+#         axis.text.y = element_text(size = 10),
+#         axis.title.x = element_text(size = 15),
+#         axis.title.y = element_text(size = 15),
+#         legend.text=element_text(size=7)) + theme(legend.position="none")
+#
+# orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
+# p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
+#                        linewidth = .5, xaxisrange = c(0, .5)) +
+#   theme(legend.text=element_text(size=7)) +
+#   scale_color_manual(labels = names(colsCobra)[orderLegend],
+#                      values = unname(colsCobra)[orderLegend],
+#                      name = 'Method')
+# legend <- get_legend(p2)
+#
+# #pdf("../../draftOverleaf/10963157vrrwqjqjdrnf/performanceIslamfc2.pdf")
+# plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
+# #dev.off()
+
+
+
 
 ```
 
