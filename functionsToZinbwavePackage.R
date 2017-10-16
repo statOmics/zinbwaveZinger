@@ -1,6 +1,6 @@
-# This file is to gather the functions needed to be added to the 
+# This file is to gather the functions needed to be added to the
 # zinbwave package. Koen, could you check the authors of the
-# functions are correct. I'll use Roxygen @author slot to give the 
+# functions are correct. I'll use Roxygen @author slot to give the
 # info to the user.
 
 # I added functions:
@@ -20,6 +20,7 @@
 #' @seealso \code{\link[DESeq2]{results}}
 #' @references
 #' Michael I Love, Wolfgang Huber, and Simon Anders. Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. Genome Biology, 15(12):550, dec 2014.
+#' @note This function uses an adapted version of the \code{pvalueAdjustment} function that was originally written by Michael I. Love as part of the DESeq2 package.
 #' @name independentFiltering
 #' @rdname independentFiltering
 #' @examples
@@ -59,6 +60,7 @@ independentFiltering <- function(object, filter, objectType=c("edgeR","limma")){
 #' @param ZI Logical, specifying whether the degrees of freedom in the statistical test should be adjusted according to the weights in the \code{fit} object to account for the downweighting. Defaults to TRUE and this option is highly recommended.
 #' @references
 #' McCarthy, DJ, Chen, Y, Smyth, GK (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. Nucleic Acids Research 40, 4288-4297.
+#' @note This function uses an adapted version of the \code{glmLRT} function that was originally written by Gordon Smyth, Davis McCarthy and Yunshun Chen as part of the edgeR package.
 #' @seealso \code{\link[edgeR]{glmLRT}}
 #' @examples
 #' library(edgeR)
@@ -88,17 +90,17 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
   }
   if(is.null(glmfit$AveLogCPM)) glmfit$AveLogCPM <- aveLogCPM(glmfit)
   nlibs <- ncol(glmfit)
-  
+
   #	Check test
   test <- match.arg(test,c("F","f","chisq"))
   if(test=="f") test <- "F"
-  
+
   #	Check design matrix
   design <- as.matrix(glmfit$design)
   nbeta <- ncol(design)
   if(nbeta < 2) stop("Need at least two columns for design, usually the first is the intercept column")
   coef.names <- colnames(design)
-  
+
   #	Evaluate logFC for coef to be tested
   #	Note that contrast takes precedence over coef: if contrast is given
   #	then reform design matrix so that contrast of interest is last column.
@@ -134,13 +136,13 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
     design <- design %*% Q
   }
   if(length(coef)==1) logFC <- as.vector(logFC)
-  
+
   #	Null design matrix
   design0 <- design[,-coef,drop=FALSE]
-  
+
   #	Null fit
   fit.null <- glmFit(glmfit$counts,design=design0,offset=glmfit$offset,weights=glmfit$weights,dispersion=glmfit$dispersion,prior.count=0)
-  
+
   #	Likelihood ratio statistic
   LR <- fit.null$deviance - glmfit$deviance
   ### ADDED
@@ -148,7 +150,7 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
   if(ZI) glmfit$df.residual <- rowSums(glmfit$weights)-ncol(design)
   ## END ADDED
   df.test <- fit.null$df.residual - glmfit$df.residual ## okay
-  
+
   #	Chisquare or F-test
   # LRT.pvalue <- switch(test,
   #                      "F" = {
@@ -171,7 +173,7 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
     glmfit$df.total <- glmfit$df.residual + prior.df/gamma.prop
     pf(LR/df.test, df1=df.test, df2=glmfit$df.total, lower.tail = FALSE, log.p = FALSE)
   }
-  
+
   rn <- rownames(glmfit)
   if(is.null(rn))
     rn <- 1:nrow(glmfit)
@@ -210,7 +212,7 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
     if (lowerQuantile < .95) upperQuantile <- .95 else upperQuantile <- 1
     theta <- seq(lowerQuantile, upperQuantile, length=50)
   }
-  
+
   # do filtering using genefilter
   stopifnot(length(theta) > 1)
   filtPadj <- filtered_p(filter=filter, test=pValue,
@@ -241,7 +243,7 @@ glmWeightedF <- function(glmfit, coef=ncol(glmfit$design), contrast=NULL, test="
   filterThreshold <- cutoffs[j]
   filterNumRej <- data.frame(theta=theta, numRej=numRej)
   filterTheta <- theta[j]
-  
+
   return(list(padj=padj, filterThreshold=filterThreshold, filterTheta=filterTheta, filterNumRej = filterNumRej, lo.fit=lo.fit, alpha=alpha))
-  
+
 }

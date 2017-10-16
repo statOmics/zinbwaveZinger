@@ -16,8 +16,6 @@ knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE
 library(zinbwave)
 library(BiocParallel)
 library(doParallel)
-library(gamlss)
-library(gamlss.tr)
 library(Biobase)
 library(edgeR)
 library(scales)
@@ -232,8 +230,32 @@ limma <- function(counts, group, ylim = NULL, xlim = NULL){
 ```
 
 ## scRNA-seq methods
+We encounter errors with the latest version of scde, as documented here: https://groups.google.com/forum/#!topic/singlecellstats/rbFUTOQ9wu4. We followed the guidelines suggested by the authors and work with version 1.99.2.
+
+```{r scde}
+scde <- function(counts, group, ylim=NULL, xlim=NULL){
+  counts = matrix(as.integer(counts),nrow=nrow(counts),ncol=ncol(counts))
+  if(is.null(colnames(counts))) colnames(counts)=paste0("sample",1:ncol(counts))
+  require(scde)
+
+  # calculate error models
+  o.ifm <- scde.error.models(counts = counts, groups = group, n.cores = 1, threshold.segmentation = TRUE, save.crossfit.plots = FALSE, save.model.plots = FALSE, verbose = 0)
+  # estimate gene expression prior
+  o.prior <- scde.expression.prior(models = o.ifm, counts = counts, length.out = 400, show.plot = FALSE)
+  # calculate differential expression
+  ediff <- scde.expression.difference(o.ifm, counts, o.prior, groups  =  group, n.randomizations  =  150, n.cores  =  1, verbose  =  0)
+  lfc <- ediff$mle
+  pval=(1-pnorm(abs(ediff$Z)))*2
+  padj=(1-pnorm(abs(ediff$cZ)))*2
+  out = cbind(pval,padj,lfc)
+  return(out)
+}
+
+```
+
 ### MAST
-```{r}
+
+```{r MAST}
 ### copied code from FPR_mocks.Rmd on September 14, 2017.
 MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   require(MAST)
@@ -273,9 +295,61 @@ MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   names(padjAll)=rownames(counts)
   padjAll[match(names(padj),names(padjAll))] = padj
 
-  list(pval = pvalAll, padj = padjAll, logfc = NA)
+  out = cbind(pval = pvalAll, padj = padjAll, logfc = NA)
+  return(out)
 }
 
+```
+
+### NODES
+
+```{r}
+NODES <- function(counts, group, xlim, ylim){
+  require(NODES)
+  g=ifelse(group==0,"A","B")
+  colnames(counts)=g
+  normCounts=pQ(counts)
+  res=NODES::NODES(data=normCounts,group=colnames(normCounts))
+  pval=vector(length=nrow(counts))
+  names(pval)=rownames(counts)
+  pval[rownames(normCounts)]=res$Fisher
+  pval[is.na(pval)]=1
+  padj=p.adjust(pval,"BH")
+  lfc=NA
+  out=cbind(pval,padj,lfc)
+  return(out)
+}
+```
+
+### metagenomeSeq
+
+```{r metagenomeSeq}
+metagenomeSeq <- function(counts, group, xlim, ylim){
+  require(metagenomeSeq)
+  design <- model.matrix(~group)
+  pheno <- AnnotatedDataFrame(data.frame(group=group))
+  rownames(pheno) <- colnames(counts)
+  p <- cumNormStatFast(counts)
+  dat <- newMRexperiment(counts=counts, phenoData=pheno, featureData = NULL, libSize = colSums(counts), normFactors = metagenomeSeq::calcNormFactors(counts, p=p))
+  fit <- fitZig(dat,design)
+  lfc <- fit$eb$coefficients[,"group1"]
+  pval <- fit$eb$p.value[,"group1"]
+  padj <- p.adjust(pval)
+  out <- cbind(pval,padj,lfc)
+  return(out)
+}
+```
+
+```{r seurat}
+Seurat <- function(counts, group, xlim=NULL, ylim=NULL){
+    require(Seurat)
+    seur = CreateSeuratObject(counts, project=paste0("cell",as.character(group)), display.progress = FALSE)
+    res <- FindMarkers(seur, ident.1 = "cell0", ident.2 = "cell1", print.bar=FALSE)
+    pval = res$p_val[match(rownames(counts),rownames(res))]
+    padj = p.adjust(pval,"BH")
+    out=cbind(pval,padj)
+    return(out)
+}
 ```
 
 ## zingeR-edgeR

@@ -14,6 +14,7 @@ output:
 This document uses Fanny's original simulation code in `islam_sims_fc2.Rmd' and has been adapted by Koen to adopt the new simulation framework.
 
 ```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE, warning=FALSE}
+setwd("/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/")
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(zinbwave)
 library(BiocParallel)
@@ -591,6 +592,7 @@ cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
+save(cobraplot,file="cobraplotIslam.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 
