@@ -1,0 +1,150 @@
+---
+title: "Case study on Usoskin dataset - FPR on mocks"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(edgeR)
+library(zinbwave)
+library(genefilter)
+source('../../functionsToZinbwavePackage.R')
+```
+
+We want to evaluate the impact of the ridge penalty ($\epsilon$) of ZINB-WaVE model on the false positive rate (FPR) for the mock comparisons from the Usoskin dataset.
+
+# Data
+
+Dataset is from the supplementary data accompanying the original paper downloaded at http://linnarssonlab.org/drg/.
+
+```{r data}
+path = '../usoskin/data/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+
+file = paste0(path, "subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+```
+
+# Influence of epsilon
+
+## Compute ZINB-WaVE observational weights
+
+We add the batch (picking session) as a covariate in the ZINB-WaVE model.
+
+```{r dataEloop}
+i = 1 
+eLoop <- eset[,as.numeric(subsets[i,])]
+cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), " genes with only 0's")
+eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+condition=factor(rep(c("A","B"),each=45))
+pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+pData(eLoop)$condition=condition
+pData(eLoop)$pickingSession=pickingSession
+design <- model.matrix(~ condition + pickingSession)
+epsVec = 10^seq(0, 14, by = 2)
+```
+
+```{r zinbesp,eval=FALSE}
+library(BiocParallel)
+library(doParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+
+zinbList <- lapply(epsVec, function(eps){
+  zinbFit(exprs(eLoop), X = design, epsilon = eps)
+})
+save(zinbList, file = 'zinbList_epsilon.rda')
+```
+
+```{r}
+load('zinbList_epsilon.rda')
+zinbList = zinbList[1:length(epsVec)]
+```
+
+```{r pvals}
+weightsList <- lapply(zinbList, function(x){
+  computeZinbwaveWeights(x, exprs(eLoop))
+})
+```
+
+## Compute p-values
+
+We use egdeR with ZINB-WaVE posterior probabilities as observation weights.
+
+```{r}
+pvalsList <- lapply(weightsList, function(w){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  d$weights <- w
+  d=estimateDisp(d, design)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  lrt$table$PValue
+})
+```
+
+## Biological coefficient of variation (BCV)
+```{r mocksEspilonBCV}
+par(mfrow=c(3,4))
+myplot <- lapply(1:length(weightsList), function(i){
+  d <- DGEList(exprs(eLoop))
+  d <- edgeR::calcNormFactors(d)
+  w = weightsList[[i]]
+  w[is.na(w)] = 1
+  d$weights <- w
+  d=estimateDisp(d, design)
+  plotBCV(d, main = paste0('epsilon=', epsVec[i]), ylim = c(0,6))
+})
+par(mfrow=c(1,1))
+```
+
+## Posterior probabilities
+```{r mocksEspilonWeights}
+par(mfrow = c(3,4))
+hh = lapply(1:length(weightsList), function(i){
+   hist(weightsList[[i]][exprs(eLoop)==0], main = paste0('epsilon=', epsVec[i]), ylim = c(0,5e5))
+})
+par(mfrow = c(1,1))
+```
+
+## FPR
+```{r fdrEpsUsoskin}
+fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
+print(length(fpr))
+plot(log10(epsVec), fpr, main = '', type = 'o', 
+     xlab = expression(paste(epsilon, ' (log10)')), ylab = 'PCER',cex.lab = 1.5,cex.axis= 1.5)
+abline(h = 0.05, col = 'red')
+```
+
+## Histogram of p-values.
+
+We are expecting uniform distribution for the p-values as the 2 groups contain cells that have been randomly sampled from all the cells. Therefore, the true number of DE genes is null. When $\epsilon < 10^6$, p-values are not uniformly distributed.
+
+```{r fdrEpsUsoskinPval}
+par(mfrow = c(3,3))
+hh = lapply(1:length(weightsList), function(i){
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000),cex.lab = 1.5,cex.axis= 1.5,cex.main=2, xlab='p-values')
+})
+par(mfrow = c(1,1))
+```
+
+## Conclusion
+
+$\epsilon>10^6$ seems to be reasonable.
+
+# sessionInfo()
+```{r}
+sessionInfo()
+```
+

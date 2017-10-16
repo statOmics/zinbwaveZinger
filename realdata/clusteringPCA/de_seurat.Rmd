@@ -1,0 +1,79 @@
+---
+title: "DE for CD4+ Tcells - Seurat DE method"
+output:
+  html_document:
+    theme: united
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+---
+***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = TRUE,
+  cache.lazy = FALSE,
+  tidy = TRUE
+)
+```
+
+When we load package Seurat, many other packages are loaded. Thus, when we want to load other packages to compare DE methods, the maximal number of DLLs is reached. That's the reason why we perform DE analysis in a separate file for Seurat method.
+
+# Data
+
+Data file `pbmc3k.rda` has been created from running `createDataObject.Rmd`.
+
+```{r}
+library(Seurat)
+load("../data/pbmc3k.rda")
+```
+
+# Find DE genes
+
+We use the default `wilcox` test from Seurat package.
+
+```{r}
+tcell.markers <- FindMarkers(object = pbmc,
+                             ident.1 = 0,
+                             ident.2 = 1,
+                             logfc.threshold = 0,
+                             genes.use = rownames(pbmc@raw.data),
+                             thresh.use = 0,
+                             test.use = "wilcox",
+                             min.pct = 0, 
+                             min.diff.pct = -Inf,
+                             print.bar = TRUE,
+                             only.pos = FALSE,
+                             max.cells.per.ident = Inf, 
+                             random.seed = 1,
+                             latent.vars = "nUMI",
+                             min.cells = 0 )
+```
+
+```{r restore}
+library(dplyr)
+head(tcell.markers, 2)
+length(unique(rownames(pbmc@raw.data)))
+length(unique(rownames(tcell.markers)))
+tcell.markers$gene = rownames(tcell.markers)
+topgenes = tcell.markers %>% top_n(20, -p_val)
+topgenes
+```
+
+Let's look at some markers.
+```{r}
+FeaturePlot(object = pbmc, features.plot = c("IL32", "S100A4"),
+            cols.use = c("green", "blue"))
+```
+
+```{r}
+FeaturePlot(object = pbmc, features.plot = c("S100A4", "CCR7"),
+            cols.use = c("green", "blue"))
+```
+
+```{r}
+write.csv(tcell.markers, file = 'tcellmarkers_seurat.csv')
+```
+
+#sessionInfo
+```{r}
+sessionInfo()
+```
