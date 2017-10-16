@@ -369,7 +369,7 @@ computeZinbwaveWeights <- function(zinb, counts){
 ```{r zinbwaveedger}
 zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main = 'ZINB-WaVE'){
   d=DGEList(counts)
-  d=suppressWarnings(calcNormFactors(d))
+  d=suppressWarnings(edgeR::calcNormFactors(d))
   design=model.matrix(~group)
   weights <- computeZinbwaveWeights(zinb, d$counts)
   d$weights <- weights
@@ -388,6 +388,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
   weights <- computeZinbwaveWeights(zinb, counts(dse))
+  weights[weights<1e-6] = 1e-6 #prevent sanity check error for weights
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -440,7 +441,6 @@ load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zin
 # Compare dispersion estimates
 ```{r islamDispFC2, warning=FALSE}
 counts = simDataIslam$counts
-R.utils::gcDLLs()
 myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma,
@@ -448,7 +448,7 @@ myfct = list(DESeq2 = DESeq2,
              NODES = NODES,
              scde = scde,
              metagenomeSeq = metagenomeSeq)
-             #Seurat = Seurat)
+# if we additionally load Seurat, too many packages are loaded and the DLL limit is reached. We ran Seurat in a separate session and will add it in this session.
 
 
 par(mfrow = c(2,2))
@@ -457,13 +457,15 @@ xlim = c(0, 16)
 res = lapply(myfct, function(fct){
   fct(counts = counts, group = grp, ylim = ylim, xlim = xlim)
 })
+load("~/seuratResIslam.rda")
+res[[8]] = seuratRes
+names(res)[8] = "Seurat"
 res[['ZINB-WaVE_DESeq2_common']] = zinbwave_DESeq2(counts, grp, zinb_c)
 res[['ZINB-WaVE_edgeR_common']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_common']]  = zinbwave_limma(counts, grp, zinb_c)
 res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
-
 par(mfrow = c(1,1))
 ```
 
@@ -568,7 +570,12 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-cobraplot <- prepare_data_for_plot(cobraperf)
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+#iCOBRA converts '-' to '.'. Redo this.
+cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
+cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
+colsCobra=colors[match(cobraNames,names(colors))]
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 #only common disp ZINB-WaVE
@@ -578,7 +585,12 @@ pp = COBRAData(pval = pvalDf[,-grep(x=colnames(pvalDf), pattern="genewise")],
                padj = padjDf[,-grep(x=colnames(padjDf), pattern="genewise")],
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-cobraplot <- prepare_data_for_plot(cobraperf)
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+#iCOBRA converts '-' to '.'. Redo this.
+cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
+cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
+colsCobra=colors[match(cobraNames,names(colors))]
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 
@@ -624,28 +636,15 @@ plot_fdrtprcurve(cobraplot, pointsize=1)
 # plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
 # #dev.off()
 
-
-
-
 ```
 
 ## Distribution of pvalues
 
-```{r islamPvaluesFC2zinbwave}
-ylim = c(0, 3000)
-par(mfrow = c(2,3))
-hist = lapply(c(8:13), function(i){
-  hist(res[[i]][,'pval'], main = names(res)[i], ylim = ylim, xlab = 'pvalues')
-})
-par(mfrow = c(1,1))
-```
-
-```{r islamPvaluesFC2}
+```{r islamPvalues}
 ylim = c(0, 3000)
 par(mfrow = c(3,3))
-hist = lapply(c(1:3, 5:10), function(i){
-  main = gsub('_common', '', names(res)[i])
-  hist(res[[i]][,'pval'], main = main, ylim = ylim, xlab = 'pvalues')
+hist = lapply(1:length(res), function(i){
+  hist(res[[i]][,'pval'], main = names(res)[i], ylim = ylim, xlab = 'pvalues')
 })
 par(mfrow = c(1,1))
 ```
