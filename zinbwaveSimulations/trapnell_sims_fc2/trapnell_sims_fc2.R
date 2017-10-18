@@ -1,5 +1,5 @@
 ---
-title: "Simulations from Islam dataset, fold change 2"
+title: "Simulations from Trapnell dataset, fold change 2"
 author: "Fanny Perraudeau & Koen Van den Berge"
 date: "`r Sys.Date()`"
 output:
@@ -11,10 +11,9 @@ output:
     toc_float: yes
 ---
 
-This document uses Fanny's original simulation code in `islam_sims_fc2.Rmd' and has been adapted by Koen to adopt the new simulation framework.
 
 ```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE, warning=FALSE}
-setwd("/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/")
+setwd("/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/trapnell_sims_fc2/")
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(zinbwave)
 library(BiocParallel)
@@ -48,56 +47,50 @@ The goal of this document is to reproduce Figure 1 from our paper. A scRNA-seq d
 
 # Simulate scRNA-seq data
 
-## Real dataset
-
-The scRNA-seq simulation is based on the Islam mouse dataset, which compares 48 embryonic stem cells to 44 embryonic fibroblasts in mouse. Reference is Saiful Islam, Una Kjallquist, Annalena Moliner, Pawel Zajac, Jian-Bing Fan, Peter Lonnerberg, and Sten Linnarsson. Characterization of the single-cell transcriptional landscape by highly multiplex RNA-seq. Genome research.
-
 ## Simulating from zingeR framework
 
 ```{r data}
-#code from https://github.com/statOmics/zingeR/blob/master/vignettes/zingeRVignette_v2.Rmd
-data(islamEset, package = "zingeR")
-islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
-cellType=pData(islamEset)[,"cellType"]
-paramsIslam = getDatasetMoMPositive(counts = islamHlp)
+load("countsTrapnellProcessed.rda")
+timePoint=factor(c(rep(48,85),rep(72,64)))
+paramsTrapnell = getDatasetMoMPositive(counts = countsTrapnell)
 ```
 
 ```{r sims}
 # code from https://github.com/statOmics/zingeR/blob/master/vignettes/zingeRVignette_v2.Rmd
-nSamples=80
+nSamples=150
 grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
 nTags=10000 #nr of features
 set.seed(11)
 DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
 fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
-libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
-simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
-                                dataset = islamHlp, nTags = nTags,
+libSizes=sample(colSums(countsTrapnell),nSamples,replace=TRUE) #library sizes
+simDataTrapnell <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = countsTrapnell, nTags = nTags,
                                 group = grp,
-                                verbose = TRUE, params = paramsIslam,
+                                verbose = TRUE, params = paramsTrapnell,
                                 lib.size = libSizes, normalizeLambda=TRUE)
-simDataIslam$counts[1:5,1:5]
+simDataTrapnell$counts[1:5,1:5]
 
 # BCV plots
-dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
-dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~cellType), interval=c(0,10)),prior.df=0)
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(countsTrapnell)))
+dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~timePoint), interval=c(0,10)),prior.df=0)
 
-d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataIslam$counts)))
+d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataTrapnell$counts)))
 d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
 
 par(mfrow=c(1,2))
-plotBCV(dOrig,ylim=c(0,13), xlim=c(2,16), main="real dataset")
-plotBCV(d,ylim=c(0,13), xlim=c(2,16), main="simulated dataset")
+plotBCV(dOrig,ylim=c(0,15), xlim=c(0,16), main="real dataset")
+plotBCV(d,ylim=c(0,15), xlim=c(0,16), main="simulated dataset")
 par(mfrow=c(1,1))
 
 # association of library size with zeros
-plot(x=colSums(islamHlp), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", ylim=c(0.2,1))
-points(x=colSums(simDataIslam$counts), y=colMeans(simDataIslam$counts==0), col=2)
+plot(x=colSums(countsTrapnell), y=colMeans(countsTrapnell==0), xlab="Log library size", ylab="Fraction of zeros", ylim=c(0.2,1))
+points(x=colSums(simDataTrapnell$counts), y=colMeans(simDataTrapnell$counts==0), col=2)
 legend("bottomleft", c("real", "simulated"), col=1:2, pch=1)
 
 # association of aveLogCPM with zeros
-plot(x=edgeR::aveLogCPM(islamHlp), y=rowMeans(islamHlp==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
-points(x=edgeR::aveLogCPM(simDataIslam$counts), y=rowMeans(simDataIslam$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
+plot(x=edgeR::aveLogCPM(countsTrapnell), y=rowMeans(countsTrapnell==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
+points(x=edgeR::aveLogCPM(simDataTrapnell$counts), y=rowMeans(simDataTrapnell$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
 legend("bottomleft", c("real", "simulated"), col=1:2, pch=16)
 
 ```
@@ -415,25 +408,25 @@ zinbwave_limma <- function(counts, group, zinb){
 # Results
 
 ```{r core}
-core <- SummarizedExperiment(simDataIslam$counts,
+core <- SummarizedExperiment(simDataTrapnell$counts,
                              colData = data.frame(grp = grp))
 ```
 
 ```{r zinbcommondisp}
-#zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
-#save(zinb_c, file = 'zinb-common-disp-fc2-eps12.rda')
-load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/zinb-common-disp-fc2-eps12.rda')
+zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
+save(zinb_c, file = 'zinb-common-disp-fc2-eps12.rda')
+load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/trapnell_sims_fc2/zinb-common-disp-fc2-eps12.rda')
 ```
 
 ```{r zinbgenewisedisp}
-#zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE, epsilon=1e12)
-#save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
-load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/zinb-genewise-disp-fc2.rda')
+zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE, epsilon=1e12)
+save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
+load('/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/trapnell_sims_fc2/zinb-genewise-disp-fc2.rda')
 ```
 
 # Compare dispersion estimates
 ```{r islamDispFC2, warning=FALSE}
-counts = simDataIslam$counts
+counts = simDataTrapnell$counts
 myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
              limmavoom = limma,
@@ -441,16 +434,16 @@ myfct = list(DESeq2 = DESeq2,
              NODES = NODES,
              scde = scde,
              metagenomeSeq = metagenomeSeq)
-# if we additionally load Seurat, too many packages are loaded and the DLL limit is reached. We ran Seurat in a separate session and will add it in this session.
+# if we additionally load Seurat in this session, too many packages are loaded and the DLL limit is reached. We ran Seurat in a separate session and will add it in this session.
 
 
 par(mfrow = c(2,2))
-ylim = c(0, 11)
+ylim = c(0, 15)
 xlim = c(0, 16)
 res = lapply(myfct, function(fct){
   fct(counts = counts, group = grp, ylim = ylim, xlim = xlim)
 })
-load("~/seuratResIslam.rda")
+load("seuratResTrapnell.rda")
 res[[8]] = seuratRes
 names(res)[8] = "Seurat"
 res[['ZINB-WaVE_DESeq2_common']] = zinbwave_DESeq2(counts, grp, zinb_c)
@@ -460,6 +453,7 @@ res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
+#save(res,file="resTrapnell.rda")
 ```
 
 ```{r res}
@@ -470,21 +464,6 @@ for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 
 ## Compare weights estimates
 
-<!-- ```{r zingerEdgerWeights}
-d=DGEList(simDataIslam$counts)
-d=suppressWarnings(calcNormFactors(d))
-design=model.matrix(~grp)
-zingeR_edgeR_weights <- zeroWeightsLS(counts=d$counts, design=design,
-                                      normalization="TMM", verbose = F)
-```
-
-```{r zingerDESeq2Weights}
-colData <- data.frame(grp = grp)
-design <- model.matrix(~ grp)
-zingeR_DESeq2_weights <- zeroWeightsLS(counts = counts, design = design,
-                           normalization = "DESeq2_poscounts", colData = colData,
-                           designFormula = ~grp, verbose = F)
-``` -->
 
 ```{r zinbwaveW}
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
@@ -493,11 +472,14 @@ zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
 
 ```{r islamWeightsFC2}
 par(mfrow=c(1,2))
-#hist(zingeR_edgeR_weights, main='zingeR_edgeR', xlab = 'Weights')
-#hist(zingeR_DESeq2_weights, main='zingeR_DESeq2', xlab = 'Weights')
-hist(zinbwave_c_weights, main ='ZINB-WaVE, common dispersion', xlab = 'Weights')
-hist(zinbwave_g_weights, main ='ZINB-WaVE, genewise dispersion', xlab = 'Weights')
-par(mfrow=c(1,1))
+zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
+hist(zinbwave_c_weights[simDataTrapnell$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+hist(zinbwave_c_weights[simDataTrapnell$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
+
+
+zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
+ hist(zinbwave_g_weights[simDataTrapnell$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+ hist(zinbwave_g_weights[simDataTrapnell$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 ```
 
 ```{r qqplotFC2}
@@ -510,11 +492,11 @@ abline(a=0,b=1)
 
 
 ## nDE, TPR, FDR (pvalue = 0.05)
-```{r islamTableFC2, results = 'asis'}
+```{r trapnellTableFC2, results = 'asis'}
 listRates = lapply(res, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
-  TPR = mean(simDataIslam$indDE %in% which( y$padj <= 0.05))
-  FDR = mean(which(y$padj <= 0.05) %in% simDataIslam$indNonDE)
+  TPR = mean(simDataTrapnell$indDE %in% which( y$padj <= 0.05))
+  FDR = mean(which(y$padj <= 0.05) %in% simDataTrapnell$indNonDE)
   c(nDE = nDE, TPR = TPR, FDR = FDR)
 })
 
@@ -533,7 +515,7 @@ kable(df)
 ## TPR vs FDR
 ```{r truth}
 trueDE = rep(0, nTags)
-trueDE[simDataIslam$indDE] = 1
+trueDE[simDataTrapnell$indDE] = 1
 ```
 
 ```{r islamROCfc2zinbwave}
@@ -557,7 +539,7 @@ trueDE[simDataIslam$indDE] = 1
 #         axis.title.y = element_text(size = 15))
 ```
 
-```{r islamROCfc2}
+```{r trapnellROCfc2}
 #all methods
 pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
@@ -586,7 +568,7 @@ cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
-save(cobraplot,file="cobraplotIslam.rda")
+save(cobraplot,file="cobraplotTrapnell.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 #only common disp ZINB-WaVE, no ZINB-WaVE_limma-voom
@@ -602,8 +584,9 @@ cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
-save(cobraplot,file="cobraplotIslamNoLimma.rda")
+save(cobraplot,file="cobraplotTrapnellNoLimma.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
+
 
 
 
@@ -651,8 +634,8 @@ plot_fdrtprcurve(cobraplot, pointsize=1)
 
 ## Distribution of pvalues
 
-```{r islamPvalues}
-png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/pvalsIslamSim.png", width=9,height=9, units="in", res=300)
+```{r trapnellPvalues}
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/pvalsTrapnellSim.png", width=9,height=9, units="in", res=300)
 ylim = c(0, 3000)
 par(mfrow = c(4,4), mar=c(3,2,1,1))
 hist = lapply(1:length(res), function(i){

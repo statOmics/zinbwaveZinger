@@ -396,7 +396,7 @@ computeZinbwaveWeights <- function(zinb, counts){
 ```{r}
 zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main = 'ZINB-WaVE'){
   d=DGEList(counts)
-  d=suppressWarnings(calcNormFactors(d))
+  d=suppressWarnings(edgeR::calcNormFactors(d))
   design=model.matrix(~group)
   weights <- computeZinbwaveWeights(zinb, counts)
   weights[weights==0] = 1e-15 #errors with zero weights
@@ -416,6 +416,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
   weights <- computeZinbwaveWeights(zinb, counts)
+  weights[weights<1e-6] = 1e-6
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
@@ -455,22 +456,15 @@ core <- SummarizedExperiment(simData$counts,
 
 ```{r zinbcommondisp}
 zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
-#save(zinb_c, file = 'zinb-common-disp-fc2.rda')
-#load('zinb-common-disp-fc2.rda')
-
-# epsValues = c(1e8, 1e10, 1e12, 1e14)
-# name=as.character(c(8, 10,12,14))
-# for(i in 1:3){
-#   assign(paste0("zinb_c_eps",name[i]), zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=epsValues[i]))
-# }
-
+#save(zinb_c, file = 'zinb-common-disp-10xfc2.rda')
+#load('zinb-common-disp-10xfc2.rda')
 
 ```
 
 ```{r zinbgenewisedisp}
-# zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
-# save(zinb_g, file = 'zinb-genewise-disp-fc2.rda')
-# load('zinb-genewise-disp-fc2.rda')
+ zinb_g <- zinbFit(core, X = '~ grp', commondispersion = FALSE)
+# save(zinb_g, file = 'zinb-genewise-disp-10xfc2.rda')
+# load('zinb-genewise-disp-10xfc2.rda')
 ```
 
 # Compare dispersion estimates
@@ -478,9 +472,11 @@ zinb_c <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
 counts = simData$counts
 myfct = list(DESeq2 = DESeq2,
              edgeR = edgeR,
-             limmavoom = limma
-             #MAST = MAST
-              )
+             limmavoom = limma,
+             MAST = MAST,
+             NODES = NODES,
+             scde = scde,
+             metagenomeSeq = metagenomeSeq)
 
 par(mfrow = c(2,2))
 ylim = c(0, 11)
@@ -489,21 +485,14 @@ res = lapply(myfct, function(fct){
   fct(counts = counts, group = grp, ylim = ylim, xlim = xlim)
 })
 res[['ZINB-WaVE_DESeq2_common']] = zinbwave_DESeq2(counts, grp, zinb_c)
-res[['ZINB_WaVE_edgeR_common']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
+res[['ZINB-WaVE_edgeR_common']]  = zinbwave_edgeR(counts, grp, zinb_c, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_common']]  = zinbwave_limma(counts, grp, zinb_c)
 res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
 
-## add high eps
-res[['ZINB_WaVE_edgeR_common8']]  = zinbwave_edgeR(counts, grp, zinb_c_eps8, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
-res[['ZINB_WaVE_edgeR_common10']]  = zinbwave_edgeR(counts, grp, zinb_c_eps10, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
-res[['ZINB_WaVE_edgeR_common12']]  = zinbwave_edgeR(counts, grp, zinb_c_eps12, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
-res[['ZINB_WaVE_edgeR_common14']]  = zinbwave_edgeR(counts, grp, zinb_c_eps14, ylim=ylim, main = 'ZINB-WaVE, common dispersion', xlim = xlim)
-
-
-
+save(res,file="/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/tenX_sims_fc2/res10x.rda")
 ```
 
 ```{r}
@@ -513,32 +502,21 @@ for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
 
 ## Compare weights estimates
 
-Very similar.
+The gene-wise dispersion weights seem to be performing less good as compared to the common dispersion weights.
 
 ```{r zinbwaveW}
 #zingeREdgeRWeights = zingeR::zeroWeightsLS(counts=simData$counts, design=model.matrix(~grp), maxit=250, llTol=1e-1, llOffset=1e-2, verbose=TRUE, plotW=TRUE)
+par(mfrow=c(1,2))
 zinbwave_c_weights <- computeZinbwaveWeights(zinb_c, counts)
 hist(zinbwave_c_weights[simData$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
 hist(zinbwave_c_weights[simData$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 
 
-zinbwave_c_weights_highEps <- computeZinbwaveWeights(zinb_c_highEpsilon, counts)
-hist(zinbwave_c_weights_highEps[simData$dropout==0], main="ZINB-WaVE common: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
-hist(zinbwave_c_weights_highEps[simData$dropout==1], main="ZINB-WaVE common: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
-
-
-
-# zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
-# hist(zinbwave_g_weights[simData$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
-# hist(zinbwave_g_weights[simData$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
+zinbwave_g_weights <- computeZinbwaveWeights(zinb_g, counts)
+ hist(zinbwave_g_weights[simData$dropout==0], main="ZINB-WaVE gene: post prob for dropout", breaks=seq(0,1,0.05), cex.main=2/3)
+ hist(zinbwave_g_weights[simData$dropout==1], main="ZINB-WaVE gene: post prob for NB zero", breaks=seq(0,1,0.05), cex.main=2/3)
 ```
 
-```{r tenxWeightsFC2}
-par(mfrow=c(2,1))
-hist(zinbwave_c_weights, main ='ZINB-WaVE, common dispersion', xlab = 'Weights')
-hist(zinbwave_g_weights, main ='ZINB-WaVE, genewise dispersion', xlab = 'Weights')
-par(mfrow=c(1,1))
-```
 
 ```{r qqplotFC2}
 qqplot(zinbwave_c_weights, zinbwave_g_weights, type = 'o',
@@ -549,7 +527,7 @@ abline(a=0,b=1)
 ```
 
 
-## nDE, TPR, FDR (pvalue = 0.05)
+## nDE, TPR, FDR (adjusted pvalue = 0.05)
 ```{r tenxTableFC2, results = 'asis'}
 listRates = lapply(res, function(y){
   nDE = sum(y$padj <= 0.05, na.rm = TRUE)
@@ -576,80 +554,42 @@ trueDE = rep(0, nTags)
 trueDE[simData$indDE] = 1
 ```
 
-```{r tenxROCfc2zinbwave}
-reszinb = res[c('ZINB-WaVE_DESeq2_common', 'ZINB-WaVE_edgeR_common',
-                 'ZINB-WaVE_limmavoom_common', 'ZINB-WaVE_DESeq2_genewise',
-                 'ZINB-WaVE_edgeR_genewise', 'ZINB-WaVE_limmavoom_genewise')]
-
-pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 1))),
-               padj = as.data.frame(do.call(cbind, lapply(reszinb, '[[', 2))),
-               truth = data.frame(status = trueDE))
-cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = "Paired",
-                                   facetted = FALSE)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"),
-                 pointsize = .2, linewidth = .5, xaxisrange = c(0, .5)) +
-  scale_color_manual(labels = sort(names(reszinb)), values = brewer.pal(6, "Paired"),
-                     name = 'Method') + theme(legend.text=element_text(size=7)) +
-  theme(axis.text.x = element_text(size = 10),
-        axis.text.y = element_text(size = 10),
-        axis.title.x = element_text(size = 15),
-        axis.title.y = element_text(size = 15))
-
-
-
-
-
-##### TEMP
-pp = COBRAData(pval = data.frame(edgeR=edgeResNewNotNorm[,"pval"],
-        zinbwaveEdgeRes = zinwaveEdgeResNewNotNorm[,"pval"],
-        #zinger_edger=hlp[,"pval"],
-        row.names=rownames(simData$counts)),
-               padj = data.frame(edgeR=edgeResNewNotNorm[,"padj"], zinbwaveEdgeRes = zinwaveEdgeResNewNotNorm[,"padj"], #zinger_edger=hlp[,"padj"],
-                row.names=rownames(simData$counts)),
-               truth = data.frame(status = trueDE, logMean = round(log(rowMeans(simData$counts)),2),
-                simDisp = simData$Dispersion[,1],
-                row.names=rownames(simData$counts)))
-cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05, splv="logMean", maxsplit=3)
-cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = "Paired")
-plot_fdrtprcurve(cobraplot, pointsize=1)
-####
-
-
-```
-
-
-
-
-
 
 
 ```{r tenxROCfc2}
-#res10 = res[1:10]
-#names(res10) = gsub('_common', '', names(res10))
-pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
-               padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
-               truth = data.frame(status = trueDE))
+#all methods
+pvalDf = as.data.frame(do.call(cbind, lapply(res, '[[', 1)))
+padjDf = as.data.frame(do.call(cbind, lapply(res, '[[', 2)))
+pp = COBRAData(pval = pvalDf,
+               padj = padjDf,
+                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB_WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+#iCOBRA converts '-' to '.'. Redo this.
+cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
+cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
+colsCobra=colors[match(cobraNames,names(colors))]
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
+save(cobraplot,file="cobraPlot10x.rda")
+plot_fdrtprcurve(cobraplot, pointsize=1, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4))
 
-reds = brewer.pal(11, "RdYlGn")[1:3]
-blues = rev(brewer.pal(11, "RdYlBu"))[1:3]
-brown =  brewer.pal(8, "Dark2")[4]
-greens = rev(brewer.pal(11, "PiYG"))[1:3]
-mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
-          blues[3], greens[3], reds[3], 'black')
-names(mycol) = names(res)
-#names(cobraperf@overlap) = names(mycol)
-colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
-cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
-                                   facetted = FALSE)
+# no ZINB-WaVE limma
+pvalDf2 = pvalDf[,-grep(x=colnames(pvalDf), pattern="ZINB-WaVE_limmavoom")]
+padjDf2 = padjDf[,-grep(x=colnames(padjDf), pattern="ZINB-WaVE_limmavoom")]
+pp = COBRAData(pval = pvalDf2,
+               padj = padjDf2,
+                truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB_WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+#iCOBRA converts '-' to '.'. Redo this.
+cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
+cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
+colsCobra=colors[match(cobraNames,names(colors))]
+cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
+save(cobraplot,file="cobraPlot10xNoLimma.rda")
+plot_fdrtprcurve(cobraplot, pointsize=1, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4))
 
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2, linewidth = .5, xaxisrange = c(0, .4), yaxisrange=c(0,0.4)) +
-  theme(axis.text.x = element_text(size = 10),
-        axis.text.y = element_text(size = 10),
-        axis.title.x = element_text(size = 15),
-        axis.title.y = element_text(size = 15),
-        legend.text=element_text(size=7)) + theme(legend.position="bottom")
+
 
 #orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
 # p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .2,
