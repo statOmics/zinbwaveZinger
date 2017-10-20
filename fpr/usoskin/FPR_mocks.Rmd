@@ -17,19 +17,17 @@ library(DESeq2)
 library(edgeR)
 library(limma)
 library(zinbwave)
-library(genefilter)
 library(BiocParallel)
 library(doParallel)
 library(Biobase)
 library(ggplot2)
-source('../../functionsToZinbwavePackage.R')
 ```
 
 The goal of this document is to evaluate the FPR of our method and compare it to the FPR of other methods (edgeR, DESeq2, limmavoom, MAST, scde). 
 
 # Data
 ```{r data}
-path = '../usoskin/data/'
+path = '../../datasets/usoskin/'
 load(paste0(path, 'esetUsoskin.RData'))
 eset=eset[rowSums(exprs(eset)>0)>=20,]
 exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
@@ -163,54 +161,6 @@ runDESeq2_poscounts <- function(e) {
 }
 ```
 
-```{r sourceEdgeRzingeR}
-# code from zingeRPaper-master/singleCellPaper/case/fpr/runScriptsUsoskin_pickingSession.R
-runEdgeREMLibSize=function(e){
-  library(edgeR)
-  library(genefilter)
-  condition = pData(e)$condition
-  pickingSession = pData(e)$pickingSession
-  design <- model.matrix(~ condition + pickingSession)
-  d <- DGEList(exprs(e))
-  d <- edgeR::calcNormFactors(d)
-  #not adding a design matrix models the zeroes with the library size automatically
-  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
-  pickingSession = pData(e)[,"Picking sessions"]
-  designZI = model.matrix(~ effLogLibSize + pickingSession)
-  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
-  d$weights = zeroWeights
-  d=estimateDisp(d,design)
-  fit <- glmFit(d, design)
-  lrt = glmWeightedF(fit, coef=2, independentFiltering = TRUE)
-  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
-       logfc = lrt$table$logFC)
-}
-```
-
-```{r zingerdeseq2}
-runDESeq2Zero <- function(e){
-  library(DESeq2) ; library(genefilter)
-  condition = pData(e)$condition
-  pickingSession = pData(e)$pickingSession
-  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
-                                design=~ condition + pickingSession)
-  dse <- estimateSizeFactors(dse, type="poscounts")
-  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
-  designZI=model.matrix(~effLogLibSize + pickingSession)
-  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE,
-                              design=model.matrix(~condition + pickingSession),
-                              colData=colData(dse), normalization="DESeq2_pos",
-                              designZI=designZI)
-  assays(dse)[["weights"]] = zeroWeights
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior=TRUE, modelMatrixType="standard")
-  res <- results(dse, name="condition_B_vs_A")
-  baseMean=unname(rowMeans(sweep(counts(dse),2,1/sizeFactors(dse),FUN="*")))
-  pvalDesZero = 2*(1-pt(abs(res$stat),df=rowSums(zeroWeights)-2))
-  padjusted = pvalueAdjustment_kvdb(pValue=pvalDesZero,filter=baseMean,alpha=0.05)
-  list(pvals=pvalDesZero,padj=padjusted$padj,logfc=res$log2FoldChange)
-}
-```
 
 ```{r zinbwaveEdgeR}
 runZinbwaveEdgeR <- function(e){
@@ -221,7 +171,6 @@ runZinbwaveEdgeR <- function(e){
   library(zinbwave)
   zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeObservationalWeights(zinb, exprs(e))
-  # use zingeR-edgeR
   d <- DGEList(exprs(e))
   d <- edgeR::calcNormFactors(d)
   d$weights <- weights
@@ -242,7 +191,6 @@ runZinbwaveDESeq2 <- function(e){
   library(zinbwave)
   zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeObservationalWeights(zinb, exprs(e))
-  # use zingeR-DESeq2
   dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
                                 design=~ condition + pickingSession)
   dse <- estimateSizeFactors(dse, type="poscounts")
@@ -334,7 +282,7 @@ runSCDE <- function(e){
   # calculate models
   counts = exprs(e)
   rownames(counts) = fData(e)[,1]
-  o.ifm <- scde.error.models(counts = counts, groups = pData(e)$condition, n.cores = 1,
+  o.ifm <- scde.error.models(counts = counts, groups = pData(e)$condition, n.cores = 2,
                              threshold.segmentation = TRUE,
                              save.crossfit.plots = FALSE, 
                              save.model.plots = FALSE, verbose = 0)
@@ -347,7 +295,7 @@ runSCDE <- function(e){
                                       n.randomizations  =  100,
                                       n.cores  =  2, verbose  =  0,
                                       batch=factor(pData(e)$pickingSession))
-  pvals=(1-pnorm(abs(ediff$Z)))*2
+  pvals=(1-pnorm(abs(ediff[[1]]$Z)))*2
   padj=p.adjust(pvals,method="BH")
   list(pvals=pvals,padj=padj,logfc=NA)
 }
@@ -359,10 +307,8 @@ runSCDE <- function(e){
 ```{r res}
 algos <- list("DESeq2"          = runDESeq2,
               "DESeq2_poscounts"= runDESeq2_poscounts,
-              "DESeq2-zingeR"   = runDESeq2Zero,
               "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "edgeR"           = runEdgeR,
-              "edgeR-zingeR"    = runEdgeREMLibSize,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
               "MAST"            = runMAST,
@@ -390,7 +336,7 @@ res <- lapply(1:nreps, function(i) {
     print(n)
     algos[[n]](eLoop)
   })
-  save(resFPR, file = sprintf('FPR_.%srda', i))
+  save(resFPR, file = sprintf('FPR_%s.rda', i))
   rm(resFPR)
   i
 })
@@ -422,7 +368,6 @@ boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
 ```{r fprUsoskin}
-boxplotData = boxplotData[!grepl('zingeR', boxplotData$method),]
 ourcol = rep(1, length(unique(boxplotData$method)))
 ourcol[c(4, 6)] = 4 #our methods in blue
 ggplot(boxplotData,
@@ -440,11 +385,8 @@ ggplot(boxplotData,
 ## Histograms of pvalues
 ```{r fprUsoskinPval}
 library(scales)
-keep = !grepl('zingeR', names(res[[1]]))
-idx = 1:length(res[[1]])
-idx = idx[keep]
 par(mfrow=c(3,3))
-hh <- sapply(idx, function(i){
+hh <- sapply(1:length(res[[1]]), function(i){
   col = 'white'
   if (i %in% c(4,7)) col = 'blue'
   hist(res[[1]][[i]]$pvals, main = names(algos)[i], 

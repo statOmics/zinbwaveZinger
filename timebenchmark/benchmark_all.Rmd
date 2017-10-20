@@ -1,0 +1,58 @@
+---
+title: "Time benchmark of the different methods"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+```
+
+```{r}
+timeList = lapply(c('tenx', 'islam', 'usoskin'), function(ds){
+  fn = list.files(sprintf('%s/', ds), '^benchmark.*.rda')
+  tt = lapply(fn, function(x){
+    meta = strsplit(x, '_')[[1]]
+    method = gsub('.rda', '', meta[3])
+    ds = meta[2]
+    load(paste0(sprintf('%s/', ds),  x))
+    c(time = timing[[3]], method = method, dataset = ds)
+  })
+  do.call(rbind, tt)
+})
+timeDF = do.call(rbind, timeList)
+timeDF = as.data.frame(timeDF)
+timeDF$time = as.numeric(as.vector(timeDF$time))
+
+timeDF$dataset = as.vector(timeDF$dataset)
+timeDF$dataset[timeDF$dataset == 'islam'] = 'Islam'
+timeDF$dataset[timeDF$dataset == 'usoskin'] = 'Usoskin'
+timeDF$dataset[timeDF$dataset == 'tenx'] = '10x Genomics PBMC'
+```
+
+## Plot
+
+```{r cpu}
+library(ggplot2)
+library(cowplot)
+library(RColorBrewer)
+
+pd <- position_dodge(0.05)
+cpu = ggplot(timeDF, aes(x = factor(method), y = time, 
+                         col = factor(dataset))) +
+  geom_point() + 
+  background_grid(major = 'xy', minor = 'xy') +
+  xlab('Methods') + ylab('CPU time (sec.)') +
+  coord_trans(y = "log10") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = c(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000))
+cpu = cpu + scale_color_discrete(name = "Datasets")
+cpu
+```

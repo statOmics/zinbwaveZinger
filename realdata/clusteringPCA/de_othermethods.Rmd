@@ -17,7 +17,6 @@ library(zinbwave)
 library(edgeR)
 library(RColorBrewer)
 library(ggplot2)
-source('../../functionsToZinbwavePackage.R')
 ```
 
 Using clustering on PCA, we want to compare the different DE methods and perform gene set enrichment analysis.
@@ -74,8 +73,8 @@ fit_edgeR <- function(counts, design, filter = NULL){
   tab$padj = p.adjust(tab$PValue, "BH")
   tab$gene = rownames(tab)
   de <- as.data.frame(tab, stringsAsFactors = FALSE)
-  de = de[, c('gene', 'PValue', 'padj', 'logFC')]
-  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de = de[, c('gene', 'PValue', 'padj', 'logFC', 'LR')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc', 'stat')
   de
 }
 ```
@@ -99,8 +98,8 @@ fit_edgeR_zi <- function(counts, design, weights,
   tab = glm$table
   tab$gene = rownames(tab)
   de <- data.frame(tab, stringsAsFactors = FALSE)
-  de = de[, c('gene', 'PValue', 'padjFilter', 'logFC')]
-  colnames(de) = c('gene', 'pval', 'padj', 'logfc')
+  de = de[, c('gene', 'PValue', 'padjFilter', 'logFC', 'LR')]
+  colnames(de) = c('gene', 'pval', 'padj', 'logfc', 'stat')
   de
 }
 ```
@@ -128,7 +127,7 @@ runLimmavoom <- function(counts, design) {
   pvals <- tt$P.Value
   padj <- p.adjust(pvals,method="BH")
   padj[is.na(padj)] <- 1
-  data.frame(gene = rownames(tt), pval=pvals, padj=padj, logfc=tt$logFC)
+  data.frame(gene = rownames(tt), pval=pvals, padj=padj, logfc=tt$logFC, stat = tt$t)
 }
 ```
 
@@ -142,7 +141,7 @@ voom$method <- 'limmavoom'
 seurat = read.csv('tcellmarkers_seurat.csv')
 seurat$method = 'seurat'
 seurat = seurat[, c('gene', 'p_val', 'p_val_adj',
-                    'avg_logFC', 'method')]
+                    'avg_logFC', 'avg_logFC', 'method')]
 colnames(seurat) = colnames(edgeR)
 ```
 
@@ -167,8 +166,7 @@ genesets <- unlist(geneIds(xCell.data$signatures))
 celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
 names(genesets) <- NULL
 gs <- tapply(genesets, celltypes, c)
-de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.005) 
-# MAST creates NAs for log fold change but fgsea does not handle NAs, so I artificially creates small log fold change. rnorm with mean = 0, and not 0 because fgsea does not handle tights.
+de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.0005) #no NA's allowed by fgsea and NAs with MAST
 set.seed(6372)
 gsea_res = lapply(unique(de$method), function(x){
   print(x)
@@ -245,7 +243,6 @@ par(mfrow= c(1,1))
 ```{r}
 for (x in unique(de$method)){
   print(x)
-  print(sum(de[de$method ==x, 'pval'] < 0.05, na.rm = TRUE))
   print(sum(de[de$method ==x, 'padj'] < 0.05, na.rm = TRUE))
 }
 ```

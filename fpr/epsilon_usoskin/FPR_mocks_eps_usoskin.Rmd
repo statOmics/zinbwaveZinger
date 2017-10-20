@@ -15,8 +15,6 @@ output:
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(edgeR)
 library(zinbwave)
-library(genefilter)
-source('../../functionsToZinbwavePackage.R')
 ```
 
 We want to evaluate the impact of the ridge penalty ($\epsilon$) of ZINB-WaVE model on the false positive rate (FPR) for the mock comparisons from the Usoskin dataset.
@@ -26,7 +24,7 @@ We want to evaluate the impact of the ridge penalty ($\epsilon$) of ZINB-WaVE mo
 Dataset is from the supplementary data accompanying the original paper downloaded at http://linnarssonlab.org/drg/.
 
 ```{r data}
-path = '../usoskin/data/'
+path = '../../datasets/usoskin/'
 load(paste0(path, 'esetUsoskin.RData'))
 eset=eset[rowSums(exprs(eset)>0)>=20,]
 exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})

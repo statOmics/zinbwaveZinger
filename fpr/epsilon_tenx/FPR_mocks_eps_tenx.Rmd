@@ -15,8 +15,6 @@ output:
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(edgeR)
 library(zinbwave)
-library(genefilter)
-source('../../functionsToZinbwavePackage.R')
 ```
 
 We want to evaluate the impact of the ridge penalty ($\epsilon$) of ZINB-WaVE on the TPR for the mock comparisons from the PBMC 10Xgenomics dataset.

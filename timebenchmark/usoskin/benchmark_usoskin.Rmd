@@ -1,35 +1,21 @@
 ---
-title: "Evaluate FPR on 10x Genomics PBMC dataset"
+title: "Time benchmark of the different methods"
 author: "Fanny Perraudeau"
 date: "`r Sys.Date()`"
 output: 
-  html_document: 
-    fig_height: 7
-    fig_width: 7
-    toc: yes
-    code_folding: hide
-    toc_float: yes
+html_document: 
+fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
 ---
 
 ```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
-library(DESeq2)
-library(edgeR)
-library(limma)
-library(zinbwave)
-library(BiocParallel)
-library(doParallel)
-library(Biobase)
-library(ggplot2)
 ```
 
-```{r}
-NCORES <- 2
-registerDoParallel(NCORES)
-register(DoparParam())
-```
-
-The goal of this document is to evaluate the FPR of our methods and compare it to the FPR of other methods (edgeR, DESeq2, limmavoom, MAST, scde) on 10x-genomics data 3k PMBCs.
+We want to time benchmark the different DE methods.
 
 # Functions
 
@@ -37,7 +23,8 @@ The goal of this document is to evaluate the FPR of our methods and compare it t
 runEdgeR <- function(e) {
   library(edgeR)
   condition = pData(e)$condition
-  design <- model.matrix(~ condition)
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
   dgel <- DGEList(exprs(e))
   dgel <- edgeR::calcNormFactors(dgel)
   dgel=estimateDisp(dgel,design)
@@ -55,9 +42,8 @@ runEdgeR <- function(e) {
 ```{r deseq2}
 runDESeq2_poscounts <- function(e) {
   library(DESeq2)
-  dds <- DESeqDataSetFromMatrix(exprs(e),
-                                colData=DataFrame(pData(e)),
-                                design=~ condition)
+  dds <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
   dds <- estimateSizeFactors(dds,type="poscounts")
   dds <- estimateDispersions(dds)
   dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
@@ -73,13 +59,14 @@ runDESeq2_poscounts <- function(e) {
 
 ```{r zinbwaveEdgeR}
 runZinbwaveEdgeR <- function(e){
-  condition = pData(e)$condition
-  design <- model.matrix(~ condition)
-  # compute zinbwave weights
   library(zinbwave)
+  library(edgeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
   zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeObservationalWeights(zinb, exprs(e))
-  # use -edgeR
   d <- DGEList(exprs(e))
   d <- edgeR::calcNormFactors(d)
   d$weights <- weights
@@ -87,22 +74,23 @@ runZinbwaveEdgeR <- function(e){
   fit=glmFit(d,design)
   lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
   pvals = lrt$table$PValue
-  list(pvals = pvals, padj = lrt$table$padjFilter, logfc = lrt$table$logFC)
+  list(pvals = pvals, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
 }
 ```
 
 ```{r zinbwavedeseq2}
 runZinbwaveDESeq2 <- function(e){
-  condition = pData(e)$condition
-  design <- model.matrix(~ condition)
-  # compute zinbwave weights
   library(zinbwave)
+  library(DESeq2)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  # compute zinbwave weights
   zinb <- zinbFit(exprs(e), X = design, epsilon = 1e12)
   weights <- computeObservationalWeights(zinb, exprs(e))
-  # use -DESeq2
-  dse <- DESeqDataSetFromMatrix(exprs(e),
-                                colData=DataFrame(pData(e)),
-                                design=~ condition)
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
+                                design=~ condition + pickingSession)
   dse <- estimateSizeFactors(dse, type="poscounts")
   dimnames(weights) = NULL
   assays(dse)[["weights"]] = weights
@@ -120,11 +108,13 @@ runMAST <- function(e){
   counts <- exprs(e)
   tpm <- counts*1e6/colSums(counts)
   tpm <- log2(tpm+1)
-  sca <- FromMatrix(tpm,cData=data.frame(group=pData(e)$condition))
+  sca <- FromMatrix(tpm,
+                    cData=data.frame(group=pData(e)$condition,
+                                     pickingSession=pData(e)$pickingSession))
   
-  # Adaptive thresholding from MAST vignette for MAIT analysis
+  # Adaptive thresholding from MAST vignette
   freq_expressed <- 0.2
-  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300,
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
                                      conditions = pData(e)$condition)
   #par(mfrow=c(5,4))
   #plot(thres)
@@ -138,7 +128,7 @@ runMAST <- function(e){
   CD$cngeneson <- CD$ngeneson-mean(ngeneson)
   colData(sca) <- CD
   ## differential expression
-  fit <- zlm(~ cngeneson + group, sca = sca,
+  fit <- zlm(~ cngeneson + group + pickingSession, sca = sca,
              method = "bayesglm", ebayes = TRUE)
   L <- matrix(0, nrow = ncol(coef(fit, "D")))
   rownames(L) <- colnames(coef(fit, "D"))
@@ -154,7 +144,8 @@ runMAST <- function(e){
 runVoom <- function(e) {
   library(limma)
   condition = pData(e)$condition
-  design <- model.matrix(~ condition)
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
   dgel <- DGEList(exprs(e))
   dgel <- edgeR::calcNormFactors(dgel)
   v <- voom(dgel,design,plot=FALSE)
@@ -188,55 +179,64 @@ runSCDE <- function(e){
   require(scde)
   # calculate models
   counts = exprs(e)
-  counts<-apply(counts,2,function(x) {storage.mode(x) <- 'integer'; x}) 
   rownames(counts) = fData(e)[,1]
-  o.ifm <- scde.error.models(counts = counts, groups = pData(e)$condition, n.cores = 2,
+  o.ifm <- scde.error.models(counts = counts,
+                             groups = pData(e)$condition, 
+                             n.cores = 2,
                              threshold.segmentation = TRUE,
                              save.crossfit.plots = FALSE, 
-                             save.model.plots = FALSE, verbose = 0)
-  
+                             save.model.plots = FALSE, 
+                             verbose = 0)
   # estimate gene expression prior
-  o.prior <- scde.expression.prior(models = o.ifm, counts = exprs(e), length.out = 400, show.plot = FALSE)
+  o.prior <- scde.expression.prior(models = o.ifm,
+                                   counts = exprs(e),
+                                   length.out = 400,
+                                   show.plot = FALSE)
   # run differential expression tests on all genes.
-  ediff <- scde.expression.difference(o.ifm, exprs(e), o.prior, 
+  ediff <- scde.expression.difference(o.ifm, exprs(e), 
+                                      o.prior, 
                                       groups  =  pData(e)$condition,
                                       n.randomizations  =  100,
-                                      n.cores  =  2, verbose  =  0,
-                                    batch=factor(pData(e)$pickingSession))
-  pvals=(1-pnorm(abs(ediff$Z)))*2
-  padj=p.adjust(pvals,method="BH")
-  list(pvals=pvals,padj=padj,logfc=NA)
+                                      n.cores  =  2, 
+                                      verbose  =  0,
+                                      batch=factor(pData(e)$pickingSession))
+  pvals = (1 - pnorm(abs(ediff[[1]]$Z))) * 2
+  padj = p.adjust(pvals, method = "BH")
+  list(pvals = pvals, padj = padj, logfc = NA)
 }
 ```
-
 
 # Data
 
 ```{r data}
-load('../../realdata/data/core.rda')
-core
-ncells = 45
-nreps = 30
+set.seed(7828)
+library(zinbwave)
+path = '../../datasets/usoskin/'
+load(paste0(path, 'esetUsoskin.RData'))
+eset=eset[rowSums(exprs(eset)>0)>=20,]
+exprs(eset) <- apply(exprs(eset),2,function(x) {storage.mode(x) <- 'integer'; x})
+file = paste0(path, "subsetMatrixUsoskinFPR_randomCellTypes.txt")
+subsets <- read.table(file)
+cData = pData(eset)[,c('Level 3', 'Picking sessions')]
+colnames(cData) = c('Level3', 'Pickingsessions')
 
-subsets = sapply(13:nreps, function(i){
-  set.seed(i)
-  c1 = sample(ncol(core), ncells, replace = FALSE)
-  remaining = seq_len(ncol(core))
-  remaining = remaining[!remaining %in% c1]
-  c2 = sample(remaining, ncells, replace = FALSE)
-  stopifnot(sum(c1 %in% c2) == 0 )
-  stopifnot(sum(c2 %in% c1) == 0 )
-  c(c1, c2)
-})
-subsets = as.data.frame(t(subsets))
+usoskin <- eset[,as.numeric(subsets[1,])]
+usoskin <- usoskin[rowSums(exprs(usoskin)) != 0, ]
+usoskin <- usoskin[sample(nrow(usoskin), 10000), ]
+condition=factor(rep(c("A","B"),each=45))
+pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+pData(usoskin)$condition=condition
+pData(usoskin)$pickingSession=pickingSession
+dim(usoskin)
 ```
 
-# Results
+# Benchmark
 
+## Time benchmarking
 ```{r res}
 algos <- list("DESeq2"          = runDESeq2,
-              "DESeq2_poscounts"= runDESeq2_poscounts,
-              "DESeq2-zinbwave" = runZinbwaveDESeq2,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2)
+algos <- list("DESeq2-poscounts"= runDESeq2_poscounts,
               "edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
@@ -247,84 +247,44 @@ names(namesAlgos) <- namesAlgos
 ```
 
 ```{r,eval=FALSE}
-eset = as(core, 'ExpressionSet')
-res <- lapply(1:nreps, function(i) {
-    cat(i," ")
-    eLoop <- eset[,as.numeric(subsets[i,])]
-    ngenes = sum(rowSums(exprs(eLoop) > 0) < 5)
-    cat(sprintf("Removing %s genes with only 0's", ngenes))
-    # remove genes with too many zeros
-    eLoop <- eLoop[rowSums(exprs(eLoop) > 0) > 4, ]
-    condition = factor(rep(c("A", "B"), each = 45))
-    pData(eLoop)$condition = condition
-    resFPR <- lapply(namesAlgos, function(n){
-      print(n)
-      algos[[n]](eLoop)
-    })
-    save(resFPR, file = sprintf('FPR_%s.rda', i))
-    rm(resFPR)
-    i
+library(doParallel)
+library(BiocParallel)
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+tt <- lapply(namesAlgos, function(n){
+  print(n)
+  timing = system.time(algos[[n]](usoskin))
+  save(timing, file = sprintf('benchmark_usoskin_%s.rda', n))
+  timing
 })
 ```
-
 
 
 ```{r}
-res <- lapply(1:nreps, function(i) {
-  load(sprintf('FPR_.%srda', i))
-  load(sprintf('FPR_scde%s.rda', i))
-  c(resFPR, resSCDE)
+cpuTime_usoskin <- sapply(namesAlgos, function(n){
+  load(sprintf('benchmark_usoskin_%s.rda', n))
+  timing[[3]]
 })
 ```
 
-## Boxplots
-```{r prepBoxplots}
-hlp=lapply(res,function(replication){
-  lapply(replication,function(method){
-    pval=method$pvals
-    pval[is.na(pval)]=1 #independent filtering
-    mean(pval<=0.05)
-  })
-})
+## Plot
 
-fprHat=Reduce(hlp,f=cbind)
-fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
-rownames(fprHat)=namesAlgos
+```{r cpu}
+library(ggplot2)
+library(cowplot)
+library(RColorBrewer)
 
-boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
-```
-
-```{r fpr10x}
-ourcol = rep(1, length(unique(boxplotData$method)))
-ourcol[c(2, 5)] = 4 #our methods in blue
-ggplot(boxplotData,
-       aes(x=reorder(method,fpr,median),y=fpr)) +
-  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
-  theme_bw() +
-    geom_point(position = position_jitter(w = 0.1, h = 0),
-               color="grey50", size=1) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
-  scale_colour_discrete(guide="none") + ylab("PCER") +
-  geom_hline(aes(yintercept=0.05,colour="red")) +
-  theme(text = element_text(size=20))
-```
-
-## Histograms of pvalues
-```{r fpr10xPval}
-library(scales)
-par(mfrow=c(3,3))
-hh <- sapply(1:length(res[[1]]), function(i){
-  col = 'white'
-  if (i %in% c(4,7)) col = 'blue'
-  hist(res[[1]][[i]]$pvals, main = names(algos)[i],
-       xlab = "p-values", cex.lab = 1.5, 
-       cex.axis =  1.5, cex.main = 1.5, col = alpha(col, .8),
-       breaks = seq(0, 1, by = 0.05)) 
-})
-par(mfrow=c(1,1))
-```
-
-# sessionInfo
-```{r}
-sessionInfo()
+dfTime = data.frame(time = cpuTime_usoskin,
+                    method = namesAlgos)
+pd <- position_dodge(0.1)
+cpu = ggplot(dfTime, aes(x = factor(method), y = time)) +
+  geom_point(position=pd) + 
+  background_grid(major = 'xy', minor = 'xy') +
+  xlab('Methods') + ylab('CPU time (sec.)') +
+  coord_trans(y = "log10") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = c(3, 5, 10, 25, 50, 100, 250, 500, 1000, 2000))
+cpu
+ggsave(filename="cpu.png", plot = cpu, device = 'png')
 ```

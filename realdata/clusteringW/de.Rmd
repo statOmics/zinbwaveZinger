@@ -17,7 +17,6 @@ library(zinbwave)
 library(edgeR)
 library(RColorBrewer)
 library(ggplot2)
-source('../../functionsToZinbwavePackage.R')
 ```
 
 Using our clustering, we want to compare the different DE methods and perform gene set enrichment analysis.
@@ -48,6 +47,7 @@ colData(core)$ours = factor(ours[colnames(core)])
 # Compute ZINB-WaVE posterior probabilities
 
 ```{r zinb,eval=FALSE}
+# also tried eps = 10e8, 10e10
 library(doParallel)
 library(BiocParallel)
 NCORES = 2
@@ -55,11 +55,11 @@ registerDoParallel(NCORES)
 register(DoparParam())
 print(system.time(zinb <- zinbFit(core, X = '~ ours',
                                   epsilon = 1e12)))
-save(zinb, file = 'zinbX_eps12.rda')
+save(zinb, file = 'zinbX.rda')
 ```
 
 ```{r weightszinb}
-load('zinbX_eps12.rda')
+load('zinbX.rda')
 counts = assay(core)
 weights_zinbwave = computeObservationalWeights(zinb, counts)
 hist(weights_zinbwave, main = 'zinbwave', xlab = 'Weights')
@@ -262,7 +262,7 @@ par(mfrow= c(1,1))
 ```{r}
 for (x in unique(de$method)){
   print(x)
-  print(sum(de[de$method ==x, 'pval'] < 0.05, na.rm = TRUE))
+  print(sum(de[de$method ==x, 'padj'] < 0.05, na.rm = TRUE))
 }
 ```
 

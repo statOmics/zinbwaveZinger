@@ -29,13 +29,17 @@ core = core[rowSums(assay(core)) > 0, ]
 colData(core)$seurat = factor(colData(core)$seurat)
 core = core[rowData(core)$seuratVarGenes, ]
 dim(core)
+```
 
+```{r}
 # zinb 
-# tried K=25 as well
+# tried K=10,25 as well as PCA in seurat tuto
 load('zinb_k20.rda')
 W = getW(zinb)
 dim(W)
+```
 
+```{r}
 # seurat object
 load('../data/pbmc3k.rda')
 pbmc
