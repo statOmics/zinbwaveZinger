@@ -16,7 +16,7 @@ cellType[stemCellID] <- "stemCell"
 islam = as.matrix(countData)
 islam = islam[!rowSums(islam>0)<5,]
 
-library(doParallel)
+library(doParallel) ; library(zinbwave)
 registerDoParallel(2)
 p=BiocParallel::DoparParam()
 design=model.matrix(~cellType)
@@ -47,6 +47,6 @@ wTrapnell = computeZinbwaveWeights(zinb=zinbTrapnellRealData, counts=countsTrapn
 
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/postProbRealData.png", width=9,height=7, units="in", res=300)
 par(mfrow=c(1,2))
-hist(wIslam, breaks=seq(0,1,0.05), main="Islam", xlab="Posterior probability")
-hist(wTrapnell, breaks=seq(0,1,0.05), main="Trapnell", xlab="Posterior probability")
+hist(wIslam[islam==0], breaks=seq(0,1,0.05), main="Islam", xlab="Posterior probability")
+hist(wTrapnell[countsTrapnell==0], breaks=seq(0,1,0.05), main="Trapnell", xlab="Posterior probability")
 dev.off()

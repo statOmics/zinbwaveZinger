@@ -1,0 +1,194 @@
+---
+title: "Simulations from Islam dataset, fold change 2"
+author: "Fanny Perraudeau & Koen Van den Berge"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+This document uses Fanny's original simulation code in `islam_sims_fc2.Rmd' and has been adapted by Koen to adopt the new simulation framework.
+
+```{r options, echo=FALSE, results="hide",message=FALSE, error=FALSE, include=FALSE, autodep=TRUE, warning=FALSE}
+setwd("/Users/koenvandenberge/Dropbox/phdKoen/singleCell/zinbwaveZingerGithub/zinbwaveZinger/zinbwaveSimulations/islam_sims_fc2/")
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(BiocParallel)
+library(doParallel)
+library(Biobase)
+library(edgeR)
+library(scales)
+library(DESeq2)
+library(iCOBRA) # roc
+library(limma)
+library(genefilter) #filtered pvalues
+library(MAST)
+library(RColorBrewer)
+library(knitr)
+library(ggplot2)
+library(cowplot)
+# use new simulation.
+#library(zingeR)
+pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
+```
+
+
+```{r cores}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+The goal of this document is to reproduce Figure 1 from our paper. A scRNA-seq dataset from Islam dataset is simulated using zingeR simulation framework. We evaluate the performance of different DE methods.
+
+# Simulate scRNA-seq data
+
+## Real dataset
+
+The scRNA-seq simulation is based on the Islam mouse dataset, which compares 48 embryonic stem cells to 44 embryonic fibroblasts in mouse. Reference is Saiful Islam, Una Kjallquist, Annalena Moliner, Pawel Zajac, Jian-Bing Fan, Peter Lonnerberg, and Sten Linnarsson. Characterization of the single-cell transcriptional landscape by highly multiplex RNA-seq. Genome research.
+
+## Simulating from zingeR framework
+
+```{r data}
+data(islamEset, package = "zingeR")
+islamHlp=exprs(islamEset)[9:nrow(exprs(islamEset)),] #first 8 are spike-ins.
+cellType=pData(islamEset)[,"cellType"]
+paramsIslam = getDatasetMoMPositive(counts = islamHlp)
+```
+
+```{r sims}
+nSamples=80
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=10000 #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
+simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = islamHlp, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsIslam,
+                                lib.size = libSizes, normalizeLambda=TRUE)
+simDataIslam$counts[1:5,1:5]
+
+# BCV plots
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(islamHlp)))
+dOrig=estimateGLMTagwiseDisp(estimateGLMCommonDisp(dOrig, design=model.matrix(~cellType), interval=c(0,10)),prior.df=0)
+
+d=suppressWarnings(edgeR::calcNormFactors(DGEList(simDataIslam$counts)))
+d=estimateGLMTagwiseDisp(estimateGLMCommonDisp(d, design=model.matrix(~grp), interval=c(0,10)),prior.df=0)
+
+par(mfrow=c(1,2))
+plotBCV(dOrig,ylim=c(0,13), xlim=c(2,16), main="real dataset")
+plotBCV(d,ylim=c(0,13), xlim=c(2,16), main="simulated dataset")
+par(mfrow=c(1,1))
+
+# association of library size with zeros
+plot(x=colSums(islamHlp), y=colMeans(islamHlp==0), xlab="Log library size", ylab="Fraction of zeros", ylim=c(0.2,1))
+points(x=colSums(simDataIslam$counts), y=colMeans(simDataIslam$counts==0), col=2)
+legend("bottomleft", c("real", "simulated"), col=1:2, pch=1)
+
+# association of aveLogCPM with zeros
+plot(x=edgeR::aveLogCPM(islamHlp), y=rowMeans(islamHlp==0), xlab="Average log CPM", ylab="Fraction of zeros", ylim=c(0,1), col=alpha(1,1/2), pch=19, cex=.3)
+points(x=edgeR::aveLogCPM(simDataIslam$counts), y=rowMeans(simDataIslam$counts==0),col=alpha(2,1/2),pch=19,cex=.3)
+legend("bottomleft", c("real", "simulated"), col=1:2, pch=16)
+
+```
+
+# Methods
+## RNA-seq methods
+
+### DESeq2 default
+
+```{r DESeq2}
+DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
+  colData <- data.frame(group = group)
+  dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  colData(dse)$group <- as.factor(colData(dse)$group)
+  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE)
+  rr <- results(dse)
+  cbind(pval = rr$pvalue, padj = rr$padj)
+}
+```
+
+
+### DESeq2 no shrink
+
+```{r DESeq2}
+DESeq2_noShrink <- function(counts, group, ylim = NULL, xlim = NULL){
+  colData <- data.frame(group = group)
+  dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  colData(dse)$group <- as.factor(colData(dse)$group)
+  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=FALSE)
+  rr <- results(dse)
+  cbind(pval = rr$pvalue, padj = rr$padj)
+}
+```
+
+### DESeq2 with imputation
+
+```{r DESeq2}
+DESeq2_impute <- function(counts, group, ylim = NULL, xlim = NULL){
+  colData <- data.frame(group = group)
+  dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  colData(dse)$group <- as.factor(colData(dse)$group)
+  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse <- DESeq(dse)
+  #dse <- estimateDispersions(dse)
+  #dse <- nbinomWaldTest(dse, betaPrior=TRUE)
+  rr <- results(dse)
+  cbind(pval = rr$pvalue, padj = rr$padj)
+}
+```
+
+
+
+
+```{r islamDispFC2, warning=FALSE}
+counts = simDataIslam$counts
+myfct = list(DESeq2 = DESeq2,
+             DESeq2_noShrink=DESeq2_noShrink,
+             DESeq2_impute=DESeq2_impute)
+
+
+ylim = c(0, 11)
+xlim = c(0, 16)
+res = lapply(myfct, function(fct){
+  fct(counts = counts, group = grp, ylim = ylim, xlim = xlim)
+})
+
+```
+
+```{r res}
+res = lapply(res, as.data.frame)
+for(k in 1:length(res)) res[[k]]$padj[is.na(res[[k]]$padj)] = 1
+```
+
+## TPR vs FDR
+
+```{r truth}
+trueDE = rep(0, nTags)
+trueDE[simDataIslam$indDE] = 1
+```
+
+```{r islamROCfc2}
+#all methods
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
+                truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplot <- prepare_data_for_plot(cobraperf)
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/islamSimDESeq2.png", width=7,height=8, units="in", res=300)
+plot_fdrtprcurve(cobraplot, pointsize=1)
+dev.off()
+
+```

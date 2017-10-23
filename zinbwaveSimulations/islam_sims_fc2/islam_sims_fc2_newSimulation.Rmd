@@ -569,6 +569,7 @@ cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
+save(cobraplot,file="cobraPlotIslamAllMethods.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 #only common disp ZINB-WaVE
