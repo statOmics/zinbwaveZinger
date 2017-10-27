@@ -1,4 +1,4 @@
-setwd("~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/zinbwaveSimulations/")
+ setwd("~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/zinbwaveSimulations/")
 library(iCOBRA)
 library(cowplot)
 
@@ -84,6 +84,19 @@ tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2)
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_allMethods.png", width=7,height=8, units="in", res=300)
 tenxPlot
 dev.off()
+
+load("./tenX_sims_fc2/cobraplot10xNoGenewise.rda")
+tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2)
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x.png", width=7,height=8, units="in", res=300)
+tenxPlot
+dev.off()
+
+load("./tenX_sims_fc2/cobraplot10xNoLimma.rda")
+tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4))
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_cutoff_noLimma.png", width=7,height=8, units="in", res=300)
+tenxPlot
+dev.off()
+
 
 
 

@@ -110,7 +110,8 @@ islamSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = islam, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsIslam,
-                                lib.size = libSizes)
+                                lib.size = libSizes,
+                                normalizeLambda=TRUE)
 
 dds_simIslam <- DESeqDataSetFromMatrix(countData = islamSim$counts,
                                     colData = data.frame(group = grp,
@@ -120,7 +121,7 @@ dds_simIslam <- DESeqDataSetFromMatrix(countData = islamSim$counts,
                                     design = ~ group)
 
 countsimQCReport(ddsList=list(original=dds_origIslam,zingeR=dds_simIslam),
-                  outputFile="~/islamEval.html",
+                  outputFile="~/islamEvalNorm.html",
                   description = "evaluation of simulated Islam dataset ", calculateStatistics=FALSE)
 
 ### trapnell
@@ -138,11 +139,12 @@ trapnellSim <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
                                 dataset = countsTrapnell, nTags = nTags,
                                 group = grp,
                                 verbose = TRUE, params = paramsTrapnell,
-                                lib.size = libSizes)
+                                lib.size = libSizes,
+                               normalizeLambda=TRUE)
 
 dds_zingerTrapnell <- DESeqDataSetFromMatrix(countData = trapnellSim$counts, colData = data.frame(group = grp, sample = colnames(trapnellSim$counts), row.names = colnames(trapnellSim$counts), stringsAsFactors = FALSE), design = ~ group)
 
-countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellEval.html", description="evaluation of simulated Trapnell dataset",
+countsimQCReport(ddsList=list(original=dds_origTrapnell,zingeR=dds_zingerTrapnell), outputFile="~/trapnellEvalNorm.html", description="evaluation of simulated Trapnell dataset",
 calculateStatistics=FALSE)
 
 ### 10x 4k pbmc dataset.

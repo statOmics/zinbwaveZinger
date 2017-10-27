@@ -265,10 +265,8 @@ MAST <- function(counts, group, ylim = NULL, xlim = NULL){
   #sca <- FromMatrix(counts,  cData=data.frame(group=group))
 
   # Adaptive thresholding from MAST vignette
-  freq_expressed <- 0.2
-  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50, conditions = group)
-  #par(mfrow=c(5,4))
-  #plot(thres)
+  freq_expressed <- 0.05
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300, min_per_bin = 50, conditions = group)
   assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
   expressed_genes <- freq(sca) > freq_expressed
   sca <- sca[expressed_genes,]
@@ -592,13 +590,13 @@ save(cobraplot,file="cobraplot10xNoGenewise.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
 # no genewise zinbwave, ZINB-WaVE limma
-pvalDf2 = pvalDf[,-grep(x=colnames(pvalDf), pattern="ZINB-WaVE_limmavoom")]
-padjDf2 = padjDf[,-grep(x=colnames(padjDf), pattern="ZINB-WaVE_limmavoom")]
+pvalDf2 = pvalDfCommon[,-grep(x=colnames(pvalDfCommon), pattern="ZINB-WaVE_limmavoom")]
+padjDf2 = padjDfCommon[,-grep(x=colnames(padjDfCommon), pattern="ZINB-WaVE_limmavoom")]
 pp = COBRAData(pval = pvalDf2,
                padj = padjDf2,
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB_WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
 #iCOBRA converts '-' to '.'. Redo this.
 cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
