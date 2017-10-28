@@ -109,7 +109,7 @@ runMAST <- function(e){
                     cData=data.frame(group=pData(e)$condition))
   
   # Adaptive thresholding from MAST vignette
-  freq_expressed <- 0.2
+  freq_expressed <- 0 #do not filter genes so that computation time is comparable for all the methods (same number of genes)
   thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
                                      conditions = pData(e)$condition)
   #par(mfrow=c(5,4))

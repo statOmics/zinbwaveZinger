@@ -113,7 +113,7 @@ runMAST <- function(e){
                                      pickingSession=pData(e)$pickingSession))
   
   # Adaptive thresholding from MAST vignette
-  freq_expressed <- 0.2
+  freq_expressed <- 0 #do not filter genes so that computation time is comparable for all the methods (same number of genes)
   thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50,
                                      conditions = pData(e)$condition)
   #par(mfrow=c(5,4))
@@ -234,14 +234,14 @@ dim(usoskin)
 
 ## Time benchmarking
 ```{r res}
-algos <- list("DESeq2"          = runDESeq2,
-              "DESeq2-zinbwave" = runZinbwaveDESeq2)
 algos <- list("DESeq2-poscounts"= runDESeq2_poscounts,
               "edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
               "MAST"            = runMAST,
-              "SCDE"            = runSCDE)
+              "SCDE"            = runSCDE,
+              "DESeq2"          = runDESeq2,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
 ```

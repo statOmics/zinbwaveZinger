@@ -150,6 +150,41 @@ voom <- runLimmavoom(counts, design)
 voom$method <- 'limmavoom'
 ```
 
+## Run MAST
+```{r runMAST}
+runMAST <- function(counts, design) {
+  library(MAST)
+  tpm <- counts*1e6/colSums(counts)
+  tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,cData=data.frame(group=factor(design[,2])))
+  # here, we keep all genes so that we can fairly compare MAST and the other methods. So, no adaptive thresholding or filtering by gene expression
+  assays(sca) <- list(tpm=assay(sca))
+  ngeneson <- apply(counts,2,function(x) mean(x>0))
+  CD <- colData(sca)
+  CD$ngeneson <- ngeneson
+  CD$cngeneson <- CD$ngeneson-mean(ngeneson)
+  colData(sca) <- CD
+  ## differential expression
+  fit <- zlm(~ cngeneson + group, sca = sca,
+             method = "bayesglm", ebayes = TRUE)
+  summaryDt = summary(fit, doLRT='group1')
+  summaryDt = summaryDt$datatable
+  fcHurdle <- merge(summaryDt[contrast=='group1'&component=='H',.(primerid, `Pr(>Chisq)`)],
+                    summaryDt[contrast=='group1' & component=='logFC', .(primerid, coef, ci.hi, ci.lo)], by='primerid')
+  fcHurdle[,padj:=p.adjust(`Pr(>Chisq)`, 'fdr')]
+  df = data.frame(gene = fcHurdle$primerid,
+             pval=fcHurdle[,'Pr(>Chisq)'], padj=fcHurdle$padj,
+             logfc=fcHurdle$coef)
+  colnames(df)[2] = 'pval'
+  df
+}
+```
+
+```{r mast}
+mast <- runMAST(counts, design)
+mast$method <- 'MAST'
+```
+
 ## Load Seurat results
 ```{r}
 seurat = read.csv('tcellmarkers_seurat.csv')
@@ -162,7 +197,7 @@ colnames(seurat) = colnames(edgeR)
 
 ## Concatenate all the result tables
 ```{r}
-de = rbind(edgeR, seurat, voom, zinbwave_edgeR)
+de = rbind(edgeR, seurat, voom, zinbwave_edgeR, mast)
 write.csv(de, file = 'deGenes.csv', row.names = FALSE)
 ```
 
@@ -180,20 +215,24 @@ library(fgsea)
 library(GSEABase)
 
 ## extract genesets from xcell
+nagenes = unique(de[is.na(de$logfc), 'gene'])
+de = de[!de$gene %in% nagenes, ]
 genesets <- unlist(geneIds(xCell.data$signatures))
 celltypes <- sapply(strsplit(names(genesets), "%"), function(x) x[1])
 names(genesets) <- NULL
 gs <- tapply(genesets, celltypes, c)
-de$logfc[is.na(de$logfc)] = rnorm(n = sum(is.na(de$logfc)), 0, 0.005) 
-# MAST creates NAs for log fold change but fgsea does not handle NAs, so I artificially creates small log fold change. rnorm with mean = 0, and not 0 because fgsea does not handle tights.
 set.seed(6372)
 gsea_res = lapply(unique(de$method), function(x){
   print(x)
   temp = de[de$method == x, ]
-  degenes = temp$logfc
-  if (x == 'seurat') degenes = - degenes # reverse design matrix in seurat
-  names(degenes) = temp$gene
-  gsea = fgsea(gs, degenes, nperm = 10000, minSize = 5)
+  pval = temp$pval
+  zscores = qnorm(1 - (pval/2))
+  zscores[is.infinite(zscores)] = max(zscores[!is.infinite(zscores)])
+  logfc = temp$logfc
+  zscores[logfc<0] = -zscores[logfc<0]
+  names(zscores) = temp$gene
+  if (x == 'seurat') zscores = -zscores
+  gsea = fgsea(gs, zscores, nperm = 10000, minSize = 5)
   gsea$method = x
   gsea[order(-abs(gsea$NES)), ]
 })
@@ -208,6 +247,10 @@ gseaDf = gseaDf[, c('method', 'pathway', 'NES')]
 sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
 sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
 gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
+```
+
+```{r}
+write.csv(gseaDf, file = 'gsea.csv')
 ```
 
 ```{r tenxcaseNESallW}
@@ -251,7 +294,7 @@ lapply(gsea_res, function(x){
 We are expecting uniformity of the pvalue with a pick close to zero corresponding to DE genes.
 
 ```{r tenxcaseHistPvalW}
-par(mfrow= c(2,2))
+par(mfrow= c(3,2))
 for (x in unique(de$method)){
   hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 3000),
        xlab = 'pvalue')

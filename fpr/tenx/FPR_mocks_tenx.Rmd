@@ -123,7 +123,7 @@ runMAST <- function(e){
   sca <- FromMatrix(tpm,cData=data.frame(group=pData(e)$condition))
   
   # Adaptive thresholding from MAST vignette for MAIT analysis
-  freq_expressed <- 0.2
+  freq_expressed <- 0.05
   thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300,
                                      conditions = pData(e)$condition)
   #par(mfrow=c(5,4))
@@ -218,7 +218,7 @@ core
 ncells = 45
 nreps = 30
 
-subsets = sapply(13:nreps, function(i){
+subsets = sapply(1:nreps, function(i){
   set.seed(i)
   c1 = sample(ncol(core), ncells, replace = FALSE)
   remaining = seq_len(ncol(core))
@@ -267,13 +267,31 @@ res <- lapply(1:nreps, function(i) {
 })
 ```
 
+```{r}
+eset = as(core, 'ExpressionSet')
+i=1
+cat(i," ")
+eLoop <- eset[,as.numeric(subsets[i,])]
+ngenes = sum(rowSums(exprs(eLoop) > 0) < 5)
+cat(sprintf("Removing %s genes with only 0's", ngenes))
+# remove genes with too many zeros
+eLoop <- eLoop[rowSums(exprs(eLoop) > 0) > 4, ]
+condition = factor(rep(c("A", "B"), each = 45))
+pData(eLoop)$condition = condition
+
+
+resFPR <- lapply(namesAlgos, function(n){
+  print(n)
+  algos[[n]](eLoop)
+})
+```
+
 
 
 ```{r}
 res <- lapply(1:nreps, function(i) {
-  load(sprintf('FPR_.%srda', i))
-  load(sprintf('FPR_scde%s.rda', i))
-  c(resFPR, resSCDE)
+  load(sprintf('FPR_%s.rda', i))
+  resFPR
 })
 ```
 
@@ -294,9 +312,11 @@ rownames(fprHat)=namesAlgos
 boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 ```
 
-```{r fpr10x}
+```{r fpr10xPCER}
+head(boxplotData,2)
+boxplotData=boxplotData[boxplotData$method != 'DESeq2', ]
 ourcol = rep(1, length(unique(boxplotData$method)))
-ourcol[c(2, 5)] = 4 #our methods in blue
+ourcol[c(1, 4)] = 4 #our methods in blue
 ggplot(boxplotData,
        aes(x=reorder(method,fpr,median),y=fpr)) +
   geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
@@ -315,7 +335,7 @@ library(scales)
 par(mfrow=c(3,3))
 hh <- sapply(1:length(res[[1]]), function(i){
   col = 'white'
-  if (i %in% c(4,7)) col = 'blue'
+  if (i %in% c(3,5)) col = 'blue'
   hist(res[[1]][[i]]$pvals, main = names(algos)[i],
        xlab = "p-values", cex.lab = 1.5, 
        cex.axis =  1.5, cex.main = 1.5, col = alpha(col, .8),
@@ -323,6 +343,46 @@ hh <- sapply(1:length(res[[1]]), function(i){
 })
 par(mfrow=c(1,1))
 ```
+
+## Plot paper
+
+```{r fpr10x,fig.width=10,fig.height=5}
+par(mar = c(4.1, 4.25, 3, 1), bty = "l")
+layout(cbind(matrix(1,3,3), matrix(2:10,3,3,byrow = TRUE)))
+# pcer = f(eps)
+library(gridBase)
+library(grid)
+plot.new()              ## suggested by @Josh
+vps <- baseViewports()
+pushViewport(vps$figure) ##   I am in the space of the autocorrelation plot
+vp1 <-plotViewport(c(1, 1, 1, 1)) ## create new vp with margins, you play with this values 
+
+h <- ggplot(boxplotData,
+       aes(x=reorder(method,fpr,median),y=fpr)) +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
+  theme_bw() +
+    geom_point(position = position_jitter(w = 0.1, h = 0),
+               color="grey50", size=1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
+  scale_colour_discrete(guide="none") + ylab("PCER") +
+  geom_hline(aes(yintercept=0.05,colour="red")) +
+  theme(text = element_text(size=20))
+
+print(h,vp = vp1)  
+mtext("a" ,at=-0.15, padj = -1, font=2, cex=4/3)
+
+# hist pvalues
+hh <- sapply(2:length(res[[1]]), function(i){
+  col = 'white'
+  if (i %in% c(3,5)) col = 'blue'
+  hist(res[[1]][[i]]$pvals, main = names(algos)[i],
+       xlab = "p-values", cex.lab = 1.5, 
+       cex.axis =  1.5, cex.main = 1.2, col = alpha(col, .8),
+       breaks = seq(0, 1, by = 0.05)) 
+  if (i==2) mtext("b" ,at=-0.7, padj = -1, font=2, cex=4/3)
+})
+```
+
 
 # sessionInfo
 ```{r}

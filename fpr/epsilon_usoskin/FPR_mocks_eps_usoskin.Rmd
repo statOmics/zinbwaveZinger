@@ -72,7 +72,7 @@ zinbList = zinbList[1:length(epsVec)]
 
 ```{r pvals}
 weightsList <- lapply(zinbList, function(x){
-  computeZinbwaveWeights(x, exprs(eLoop))
+  computeObservationalWeights(x, exprs(eLoop))
 })
 ```
 
@@ -117,7 +117,7 @@ par(mfrow = c(1,1))
 ```
 
 ## FPR
-```{r fdrEpsUsoskin}
+```{r fdrEpsUsoskinEps}
 fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
 print(length(fpr))
 plot(log10(epsVec), fpr, main = '', type = 'o', 
@@ -136,6 +136,27 @@ hh = lapply(1:length(weightsList), function(i){
 })
 par(mfrow = c(1,1))
 ```
+
+## Plot paper
+
+```{r fdrEpsUsoskin,fig.width=10,fig.height=5}
+par(mar = c(4.1, 4.25, 3, 1), bty = "l")
+layout(cbind(matrix(1,3,3), matrix(2:10,3,3,byrow = TRUE)))
+# pcer = f(eps)
+fpr = sapply(pvalsList, function(x) mean(x <= 0.05))
+print(length(fpr))
+plot(log10(epsVec), fpr, main = '', type = 'o',
+     xlab = expression(paste(epsilon,' (log10)')), ylab = 'PCER',cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5)
+abline(h = 0.05, col = 'red')
+mtext("a" ,at=-2, font=2, padj = -1,cex=4/3)
+
+# hist pvalues
+hh = lapply(1:length(epsVec), function(i){
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000),cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5, xlab = 'p-values')
+  if (i==1) mtext("b" ,at=-1,padj = -1, font=2, cex=4/3)
+})
+```
+
 
 ## Conclusion
 

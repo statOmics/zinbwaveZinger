@@ -1,0 +1,156 @@
+---
+title: "Plots for paper - real data 10x"
+author: "Fanny Perraudeau"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+  fig_height: 7
+fig_width: 7
+toc: yes
+code_folding: hide
+toc_float: yes
+---
+  
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(ggplot2)
+```
+
+# Main figure
+
+## GSEA 
+### Clustering with W
+
+```{r}
+size=8
+```
+
+```{r}
+gseaDf = read.csv('clusteringW/gsea.csv')
+sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
+sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
+gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
+gseaAllW <- ggplot(gseaDf, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, space = "Lab", 
+                       name="Normalized\nEnrichment\nScore") +
+  ylab('Cell Type') + xlab('Method') 
+```
+
+```{r}
+chosen = c('CD4+ memory T-cells','CD4+ Tem','CD4+ Tcm','CD4+ naive T-cells')
+sub = gseaDf[gseaDf$pathway %in% chosen, ]
+nes = sub$NES
+limit = max(abs(min(nes)), max(nes))
+sub$pathway = factor(sub$pathway, levels = chosen)
+gseaCD4W <- ggplot(sub, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) + 
+  scale_fill_gradient2(low = "blue", high = "red", 
+                       mid = "white", 
+                       midpoint = 0, space = "Lab", name="Normalized\nEnrichment\nScore", 
+                       limit = c(-limit, limit)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('Cell Type') + xlab('Method') +
+  theme(text = element_text(size = size))
+```
+
+### Clustering with PCA
+
+```{r}
+gseaDf = read.csv('clusteringPCA/gsea.csv')
+sortedPwy = gseaDf[gseaDf$method == 'zinbwave_edgeR', ]
+sortedPwy = sortedPwy[order(sortedPwy$NES), 'pathway']
+gseaDf$pathway = factor(gseaDf$pathway, levels = sortedPwy)
+gseaAllPCA <- ggplot(gseaDf, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, space = "Lab", 
+                       name="Normalized\nEnrichment\nScore") +
+  ylab('Cell Type') + xlab('Method') 
+```
+
+```{r}
+chosen = c('CD4+ memory T-cells','CD4+ Tem','CD4+ Tcm','CD4+ naive T-cells')
+sub = gseaDf[gseaDf$pathway %in% chosen, ]
+nes = sub$NES
+limit = max(abs(min(nes)), max(nes))
+sub$pathway = factor(sub$pathway, levels = chosen)
+gseaCD4PCA <- ggplot(sub, aes(method, pathway)) +
+  geom_tile(aes(fill = NES)) + 
+  scale_fill_gradient2(low = "blue", high = "red", 
+                       mid = "white", 
+                       midpoint = 0, space = "Lab", name="Normalized\nEnrichment\nScore", 
+                       limit = c(-limit, limit)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('Cell Type') + xlab('Method') +
+  theme(text = element_text(size = size))
+```
+
+## TSNE
+```{r}
+load('clusteringW/pmbc.rda')
+load('clusteringW/pmbc_seurat.rda')
+p3 <- Seurat::TSNEPlot(object = pbmc, do.return = TRUE, no.legend = FALSE,
+               do.label = FALSE)
+tsne <- p3 + 
+  theme(text = element_text(size = size), 
+        legend.title = element_text()) +
+  guides(colour = guide_legend(override.aes = list(size = 3))) +
+  scale_color_brewer(palette="Set1") +
+  labs(color='Clustering with W')
+
+p4 <- Seurat::TSNEPlot(object = pbmc_seurat, do.return = TRUE, no.legend = FALSE, do.label = FALSE, pt.size = 0.5)
+tsneSeurat <- p4 + labs(color='Clustering with PCA') +
+  theme(text = element_text(size = size),
+        legend.title = element_text()) +
+  guides(colour = guide_legend(override.aes = list(size = 3))) 
+```
+
+## Figure
+```{r tenxcase}
+library(cowplot)
+plot_grid(tsneSeurat,
+          gseaCD4W + theme(text = element_text(size = size),
+                           axis.text=element_text(size=size)),
+          tsne, 
+          gseaCD4PCA + theme(text = element_text(size = size),
+                             axis.text=element_text(size=size)),
+          labels = c("a", "b", 'c','d'),
+          nrow = 2, ncol = 2)
+```
+
+```{r tenxcaseNES}
+plot_grid(gseaAllPCA + theme(text = element_text(size = size),
+                             axis.text=element_text(size=size)),
+          gseaAllW + theme(text = element_text(size = size),
+                           axis.text=element_text(size=size)),
+          labels = c("a", "b"),
+          nrow = 1, ncol = 2)
+```
+
+
+# P-values
+```{r tenxcasePval}
+par(mar = c(4.1, 4.25, 3, 1), bty = "l")
+layout(cbind(matrix(1:6, nrow=3, ncol = 2, byrow = TRUE),
+       matrix(7:12, nrow=3, ncol = 2, byrow = TRUE)))
+de = read.csv('clusteringPCA/deGenes.csv', stringsAsFactors = FALSE)
+for (x in unique(de$method)){
+  hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 2500),
+       xlab = 'p-values')
+  if (x=='edgeR') mtext("a" ,at=-0.5, padj = -1, font=2, cex=4/3)
+}
+plot.new()
+de = read.csv('clusteringW/deGenes.csv', stringsAsFactors = FALSE)
+for (x in unique(de$method)){
+  hist(de[de$method == x, 'pval'], main = x, ylim = c(0, 2500),
+       xlab = 'p-values')
+  if (x=='edgeR') mtext("b" ,at=-0.6, padj = -1, font=2, cex=4/3)
+}
+```
+
+
+

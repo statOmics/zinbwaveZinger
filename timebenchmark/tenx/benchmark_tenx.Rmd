@@ -109,8 +109,8 @@ runMAST <- function(e){
                     cData=data.frame(group=pData(e)$condition))
   
   # Adaptive thresholding from MAST vignette
-  freq_expressed <- 0.2
-  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 500, conditions = pData(e)$condition)
+  freq_expressed <- 0 #do not filter genes so that computation time is comparable for all the methods (same number of genes)
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 300, conditions = pData(e)$condition)
   #par(mfrow=c(5,4))
   #plot(thres)
   assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
@@ -221,11 +221,10 @@ algos <- list("limma-voom"      = runVoom,
               "MAST"            = runMAST,
               "edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
+              "DESeq2"          = runDESeq2,
               "DESeq2-poscounts"= runDESeq2_poscounts,
               "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "SCDE"            = runSCDE)
-algos = list("DESeq2_poscounts"= runDESeq2_poscounts,
-             "DESeq2-zinbwave" = runZinbwaveDESeq2)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
 ```

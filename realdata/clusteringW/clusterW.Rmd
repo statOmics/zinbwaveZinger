@@ -107,6 +107,10 @@ our_clus <- pbmc@ident
 names(our_clus) <- paste0(names(pbmc@ident), "-1")
 table(seurat_clus, our_clus)
 ```
+```{r}
+save(pbmc, file = 'pmbc.rda')
+save(pbmc_seurat, file = 'pmbc_seurat.rda')
+```
 
 ```{r}
 set.seed(9374)
@@ -151,6 +155,12 @@ pall = plot_grid(p1 + theme(legend.position = "none") ,
                    theme(legend.position = "none"),
                  p4 + theme(legend.position = "none"))
 plot_grid(pall, legendall, rel_widths = c(3, 1))
+```
+```{r tenxcaseW}
+library(cowplot)
+plot_grid(p1 + theme(legend.position = "none"),
+          p2 + theme(legend.position = "none"),
+          labels = c("a", "b"), ncol = 2, nrow = 1, align = "h")
 ```
 
 ```{r}
