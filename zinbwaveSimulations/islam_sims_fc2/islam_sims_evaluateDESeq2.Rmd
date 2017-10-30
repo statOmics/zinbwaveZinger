@@ -105,7 +105,7 @@ legend("bottomleft", c("real", "simulated"), col=1:2, pch=16)
 
 ### DESeq2 default
 
-```{r DESeq2}
+```{r}
 DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   colData <- data.frame(group = group)
   dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
@@ -136,7 +136,7 @@ DESeq2_noShrink <- function(counts, group, ylim = NULL, xlim = NULL){
 
 ### DESeq2 with imputation
 
-```{r DESeq2}
+```{r}
 DESeq2_impute <- function(counts, group, ylim = NULL, xlim = NULL){
   colData <- data.frame(group = group)
   dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
@@ -188,7 +188,7 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplot <- prepare_data_for_plot(cobraperf)
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/islamSimDESeq2.png", width=7,height=8, units="in", res=300)
-plot_fdrtprcurve(cobraplot, pointsize=1)
+plot_fdrtprcurve(cobraplot, pointsize=1) + xlab("FDP")
 dev.off()
 
 ```

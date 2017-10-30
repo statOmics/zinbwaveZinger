@@ -580,14 +580,14 @@ pp = COBRAData(pval = pvalDfCommon,
                padj = padjDfCommon,
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue", "ZINB-WaVE_DESeq2_noShrink"="dodgerblue")
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
 #iCOBRA converts '-' to '.'. Redo this.
 cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 #save(cobraplot,file="cobraplot10xNoGenewise.rda")
-plot_fdrtprcurve(cobraplot, pointsize=1)
+plot_fdrtprcurve(cobraplot, pointsize=2) + xlab("FDP")
 
 # no genewise zinbwave, ZINB-WaVE limma
 pvalDf2 = pvalDfCommon[,-grep(x=colnames(pvalDfCommon), pattern="ZINB-WaVE_limmavoom")]
@@ -603,7 +603,7 @@ cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 save(cobraplot,file="cobraPlot10xNoLimma.rda")
-plot_fdrtprcurve(cobraplot, pointsize=1, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4))
+plot_fdrtprcurve(cobraplot, pointsize=2, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4)) + xlab("FDP")
 
 
 

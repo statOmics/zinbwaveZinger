@@ -158,7 +158,7 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplot <- prepare_data_for_plot(cobraperf)
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/trapnellSimDESeq2.png", width=7,height=8, units="in", res=300)
-plot_fdrtprcurve(cobraplot, pointsize=1)
+plot_fdrtprcurve(cobraplot, pointsize=1) + xlab("FDP")
 dev.off()
 
 ```

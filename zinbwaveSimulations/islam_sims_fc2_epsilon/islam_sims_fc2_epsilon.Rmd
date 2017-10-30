@@ -269,20 +269,22 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplot <- prepare_data_for_plot(cobraperf)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5)
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/islamEpsEval.png", width=7,height=8, units="in", res=300)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5) + xlab("FDP")
+dev.off()
 
 pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 1))),
                padj = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 2))),
                truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
 cobraplotDESeq <- prepare_data_for_plot(cobraperf)
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5) + xlab("FDP")
 ```
 
 ```{r}
-plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5) + xlab("FDP")
 
-plot_fdrtprcurve(cobraplotDESeq, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5)
+plot_fdrtprcurve(cobraplotDESeq, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5) + xlab("FDP")
 
 ```
 

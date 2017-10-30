@@ -80,7 +80,7 @@ dev.off()
 
 ### 10x
 load("./tenX_sims_fc2/cobraplot10x.rda")
-tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2)
+tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2) + xlab("FDP")
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_allMethods.png", width=7,height=8, units="in", res=300)
 tenxPlot
 dev.off()
