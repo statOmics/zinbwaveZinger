@@ -18,6 +18,7 @@ knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE
 ```{r}
 timeList = lapply(c('tenx', 'islam', 'usoskin'), function(ds){
   fn = list.files(sprintf('%s/', ds), '^benchmark.*.rda')
+  fn = fn[fn!=sprintf('benchmark_%s_DESeq2.rda',ds)]
   tt = lapply(fn, function(x){
     meta = strsplit(x, '_')[[1]]
     method = gsub('.rda', '', meta[3])

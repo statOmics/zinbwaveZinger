@@ -110,16 +110,16 @@ tsneSeurat <- p4 + labs(color='Clustering with PCA') +
 ```
 
 ## Figure
-```{r tenxcase}
+```{r tenxcase,fig.height=3,fig.width=10}
+size=8
 library(cowplot)
 plot_grid(tsneSeurat,
-          gseaCD4W + theme(text = element_text(size = size),
-                           axis.text=element_text(size=size)),
-          tsne, 
           gseaCD4PCA + theme(text = element_text(size = size),
+                           axis.text=element_text(size=size)),
+          gseaCD4W + theme(text = element_text(size = size),
                              axis.text=element_text(size=size)),
-          labels = c("a", "b", 'c','d'),
-          nrow = 2, ncol = 2)
+          labels = c("a", "b", "c"),
+          nrow = 1, ncol = 3)
 ```
 
 ```{r tenxcaseNES}

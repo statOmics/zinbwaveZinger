@@ -33,7 +33,7 @@ dim(core)
 
 ```{r}
 # zinb 
-# tried K=10,25 as well as PCA in seurat tuto
+# tried K=10,25 - same as PCA in seurat tuto
 load('zinb_k20.rda')
 W = getW(zinb)
 dim(W)
@@ -156,11 +156,15 @@ pall = plot_grid(p1 + theme(legend.position = "none") ,
                  p4 + theme(legend.position = "none"))
 plot_grid(pall, legendall, rel_widths = c(3, 1))
 ```
-```{r tenxcaseW}
+
+```{r tenxcaseW,fig.height=3,fig.width=10}
 library(cowplot)
-plot_grid(p1 + theme(legend.position = "none"),
+plot_grid(p3 + theme(legend.position = "none") +
+            scale_color_brewer(palette="Set1"),
+          p1 + theme(legend.position = "none"),
           p2 + theme(legend.position = "none"),
-          labels = c("a", "b"), ncol = 2, nrow = 1, align = "h")
+          labels = c("a", "b", "c"), ncol = 3, nrow = 1,
+          align = "h")
 ```
 
 ```{r}

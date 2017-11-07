@@ -158,7 +158,7 @@ runVoom <- function(e) {
 runDESeq2 <- function(e, retDDS=FALSE) {
   library(DESeq2)
   dds <- DESeqDataSetFromMatrix(exprs(e), DataFrame(pData(e)), ~ condition)
-  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE)
+  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE, minReplicatesForReplace=Inf) # imputation step disabled
   res <- results(dds)
   beta <- res$log2FoldChange
   pvals <- res$pvalue
@@ -178,7 +178,7 @@ runSCDE <- function(e){
   rownames(counts) = rownames(fData(e))
   o.ifm <- scde.error.models(counts = counts,
                              groups = pData(e)$condition, 
-                             n.cores = 2,
+                             n.cores = 1,
                              threshold.segmentation = TRUE,
                              save.crossfit.plots = FALSE, 
                              save.model.plots = FALSE, 
@@ -193,7 +193,7 @@ runSCDE <- function(e){
                                       o.prior, 
                                       groups  =  pData(e)$condition,
                                       n.randomizations  =  100,
-                                      n.cores  =  2, 
+                                      n.cores  =  1, 
                                       verbose  =  0)
   pvals = (1 - pnorm(abs(ediff$Z))) * 2
   padj = p.adjust(pvals, method = "BH")
@@ -221,7 +221,6 @@ algos <- list("limma-voom"      = runVoom,
               "MAST"            = runMAST,
               "edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
-              "DESeq2"          = runDESeq2,
               "DESeq2-poscounts"= runDESeq2_poscounts,
               "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "SCDE"            = runSCDE)
@@ -230,11 +229,6 @@ names(namesAlgos) <- namesAlgos
 ```
 
 ```{r}
-library(doParallel)
-library(BiocParallel)
-NCORES <- 2
-registerDoParallel(NCORES)
-register(DoparParam())
 tt <- lapply(namesAlgos, function(n){
   print(n)
   timing = system.time(algos[[n]](tenx))
