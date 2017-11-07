@@ -135,19 +135,48 @@ plotBCVIk = function (y, xlab = "Average log CPM", ylab = "Biological coefficien
 }
 
 
+### add 2 real scRNA-seq datasets from conquer
+library(MultiAssayExperiment) ; library(edgeR)
+files=list.files("/Users/koenvandenberge/PhD_Data/singleCell/conquer/")
+rdsFiles=files[grep(x=files,pattern=".rds$")]
+# discard trimmed data
+rdsFiles=rdsFiles[-grep(rdsFiles,pattern="trimmed.rds")]
+# discard small datasets
+rdsFiles=rdsFiles[-c(2:4)]
+rdsNames=c("Buettner, 2015", "Deng, 2014", "Shalek, 2014", "Shalek, 2014", "Trapnell, 2014", "Trapnell, 2014", "Patel, 2014", "Kumar, 2014", "Kumar, 2014", "Guo, 2015", "Engel, 2016", "Meyer, 2016")
+rdsNamesSub=rdsNames[-c(4,6,9)]
+bcvList <- list()
+for(i in 1:2){ #get first 2 datasets
+    cat(i)
+    data=readRDS(paste0("/Users/koenvandenberge/PhD_Data/singleCell/conquer/",rdsFiles[i]))
+    countData <- round(assay(experiments(data)$gene,"count"))
+    d=DGEList(countData[,1:10])
+    d=edgeR::calcNormFactors(d)
+    d=estimateDisp(d, prior.df=0)
+    bcvList[[i]]=d
+}
+
+
+
 
 ### composite plot
-#png("~/Dropbox/phdKoen/singleCell/figures/introBCVRNAseq.png",width=10,height=8,units="in",res=100)
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZingeR/plots2/introBCVRNAseq.png",width=10,height=12,units="in",res=100)
 #pdf("~/Dropbox/phdKoen/singleCell/figures/introBCVRNAseq.pdf",width=10,height=8)
-par(mfrow=c(2,2), mar=c(5,5,3,1))
-plotBCVIk(dNoZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l")
+#dev.new(width=10,height=12)
+par(mfrow=c(3,2), mar=c(5,5,3,1))
+
+plotBCVIk(bcvList[[1]], col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", ylim=c(0,7), xlim=c(-2.3,15), main="scRNA-seq: Buettner (2015)")
 mtext("a",side=3, at=-4.9, cex=4/3,font=2)
-plotBCVIk(dZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l")
-mtext("b",side=3, at=-5.1, cex=4/3,font=2)
-plotBCVIk(dW, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l")
-mtext("c",side=3, at=-5.1, cex=4/3,font=2)
+plotBCVIk(bcvList[[2]], col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", ylim=c(0,7), xlim=c(-2.3,15), main="scRNA-seq: Deng (2014)")
+mtext("b",side=3, at=-4.9, cex=4/3,font=2)
+plotBCVIk(dNoZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="RNA-seq: simulated Bottomly")
+mtext("c",side=3, at=-3.5, cex=4/3,font=2)
+plotBCVIk(dZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="ZI RNA-seq: simulated Bottomly")
+mtext("d",side=3, at=-3.5, cex=4/3,font=2)
+plotBCVIk(dW, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="downeighted ZI RNA-seq: simulated Bottomly")
+mtext("e",side=3, at=-3.5, cex=4/3,font=2)
 plot(x=hlp$FDR[hlp$method=="edgeR"], y=hlp$TPR[hlp$method=="edgeR"], type="l", xlim=c(0,0.4), col="red", lwd=2, xlab="False discovery proportion", ylab="True positive rate", cex.axis=1.5, cex.lab=1.5, bty="l")
 lines(x=hlp$FDR[hlp$method=="edgeRWeighted"], y=hlp$TPR[hlp$method=="edgeRWeighted"], type="l", xlim=c(0,0.4), col="chocolate1", lwd=2, xlab="False discovery rate", ylab="True positive rate")
 legend("bottomright",c("edgeR","weighted edgeR"),bty="n",lty=1,lwd=2,col=c("red","chocolate1"), cex=1.33)
-mtext("d",side=3,at=-0.1,cex=4/3,font=2)
-#dev.off()
+mtext("f",side=3,at=-0.05,cex=4/3,font=2)
+dev.off()

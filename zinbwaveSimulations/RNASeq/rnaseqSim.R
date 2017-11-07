@@ -15,6 +15,7 @@ nTags <- 20e3
 set.seed(2)
 grp <- as.factor(rep(0:1, each = nSamp/2))
 libSize = sample(round(seq(8e6,10e6,length.out=nSamp)))
+#libSize = sample(round(seq(4e6,5e6,length.out=nSamp)))
 DEind = sample(1:nTags,floor(nTags/20),replace=FALSE) #5% differentially expressed
 fcSim <- (2 + rexp(length(DEind), rate = 1)) #adapted from Soneson et al. 2016, Genome Biology
 set.seed(1)
@@ -90,7 +91,7 @@ registerDoParallel(NCORES)
 register(DoparParam())
 core <- SummarizedExperiment(dataNoZI$counts,
                              colData = data.frame(grp = grp))
-zinbCommonNoZI <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+zinbCommonNoZI <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
 
 
 pvalEdger = edgeR(counts=dataNoZI$counts, group=grp)
@@ -150,7 +151,7 @@ dataZeroes$counts = dataZeroes$counts*zeroId
 
 core <- SummarizedExperiment(dataZeroes$counts,
                              colData = data.frame(grp = grp))
-zinbCommonZero <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+zinbCommonZero <- zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon=1e12)
 
 
 pvalEdgerZero = edgeR(counts=dataZeroes$counts, group=grp)
@@ -168,7 +169,7 @@ pvalZinbwaveDESeq2Zero[is.na(pvalZinbwaveDESeq2Zero[,"padj"]),"padj"]=1
 
 library(iCOBRA)
 truthNoZI=data.frame(status=rep(0,nTags), row.names=rownames(dataNoZI))
-truthNoZI[dataNoZI$indDE,"status"]=1
+truthNoZI[dataZeroes$indDE,"status"]=1
 cobraNoZI <- COBRAData(pval =data.frame(
 					edgeR=pvalEdgerZero[,"pval"],
 					"ZINB-WaVE_edgeR"=pvalZinbwaveEdgeRZero[,"pval"],
@@ -189,7 +190,7 @@ cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplotZero <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
-plot_fdrtprcurve(cobraplot, pointsize=2)
+plot_fdrtprcurve(cobraplotZero, pointsize=2)
 
 
 
