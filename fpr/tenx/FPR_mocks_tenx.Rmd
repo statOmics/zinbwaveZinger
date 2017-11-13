@@ -59,13 +59,11 @@ runDESeq2_poscounts <- function(e) {
                                 colData=DataFrame(pData(e)),
                                 design=~ condition)
   dds <- estimateSizeFactors(dds,type="poscounts")
-  dds <- estimateDispersions(dds)
-  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
+  dds <- estimateDispersions(dds, minmu = 1e-3)
+  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard", minmu = 1e-3)
   res <- results(dds, name="condition_B_vs_A")
   pvals <- res$pvalue
   padj <- res$padj
-  pvals[is.na(pvals)] <- 1
-  padj[is.na(padj)] <- 1
   logfc <- res$log2FoldChange
   list(pvals=pvals, padj=padj, logfc = logfc)
 }
@@ -106,9 +104,8 @@ runZinbwaveDESeq2 <- function(e){
   dse <- estimateSizeFactors(dse, type="poscounts")
   dimnames(weights) = NULL
   assays(dse)[["weights"]] = weights
-  dse <- estimateDispersions(dse)
-  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
-  resultsNames(dse)
+  dse <- estimateDispersions(dse, minmu = 1e-3)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu = 1e-3)
   res = results(dse, name="conditionB")
   list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
 }
@@ -168,21 +165,6 @@ runVoom <- function(e) {
 }
 ```
 
-```{r}
-runDESeq2 <- function(e, retDDS=FALSE) {
-  library(DESeq2)
-  dds <- DESeqDataSetFromMatrix(exprs(e), DataFrame(pData(e)), ~ condition)
-  dds <- DESeq(dds,betaPrior=TRUE,quiet=TRUE)
-  res <- results(dds)
-  beta <- res$log2FoldChange
-  pvals <- res$pvalue
-  padj <- res$padj
-  pvals[is.na(pvals)] <- 1
-  padj[is.na(padj)] <- 1
-  list(pvals=pvals, padj=padj, logfc=NA)
-}
-```
-
 ```{r scde}
 runSCDE <- function(e){
   require(scde)
@@ -234,8 +216,7 @@ subsets = as.data.frame(t(subsets))
 # Results
 
 ```{r res}
-algos <- list("DESeq2"          = runDESeq2,
-              "DESeq2_poscounts"= runDESeq2_poscounts,
+algos <- list("DESeq2"          = runDESeq2_poscounts,
               "DESeq2-zinbwave" = runZinbwaveDESeq2,
               "edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
@@ -268,27 +249,6 @@ res <- lapply(1:nreps, function(i) {
 ```
 
 ```{r}
-eset = as(core, 'ExpressionSet')
-i=1
-cat(i," ")
-eLoop <- eset[,as.numeric(subsets[i,])]
-ngenes = sum(rowSums(exprs(eLoop) > 0) < 5)
-cat(sprintf("Removing %s genes with only 0's", ngenes))
-# remove genes with too many zeros
-eLoop <- eLoop[rowSums(exprs(eLoop) > 0) > 4, ]
-condition = factor(rep(c("A", "B"), each = 45))
-pData(eLoop)$condition = condition
-
-
-resFPR <- lapply(namesAlgos, function(n){
-  print(n)
-  algos[[n]](eLoop)
-})
-```
-
-
-
-```{r}
 res <- lapply(1:nreps, function(i) {
   load(sprintf('FPR_%s.rda', i))
   resFPR
@@ -314,7 +274,7 @@ boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
 
 ```{r fpr10xPCER}
 head(boxplotData,2)
-boxplotData=boxplotData[boxplotData$method != 'DESeq2', ]
+boxplotData$method = as.vector(boxplotData$method) 
 ourcol = rep(1, length(unique(boxplotData$method)))
 ourcol[c(1, 4)] = 4 #our methods in blue
 ggplot(boxplotData,
@@ -335,8 +295,9 @@ library(scales)
 par(mfrow=c(3,3))
 hh <- sapply(1:length(res[[1]]), function(i){
   col = 'white'
-  if (i %in% c(3,5)) col = 'blue'
-  hist(res[[1]][[i]]$pvals, main = names(algos)[i],
+  if (i %in% c(2,4)) col = 'blue'
+  nn = names(algos)[i]
+  hist(res[[1]][[i]]$pvals, main = nn,
        xlab = "p-values", cex.lab = 1.5, 
        cex.axis =  1.5, cex.main = 1.5, col = alpha(col, .8),
        breaks = seq(0, 1, by = 0.05)) 
@@ -372,10 +333,11 @@ print(h,vp = vp1)
 mtext("a" ,at=-0.15, padj = -1, font=2, cex=4/3)
 
 # hist pvalues
-hh <- sapply(2:length(res[[1]]), function(i){
+hh <- sapply(1:length(res[[1]]), function(i){
   col = 'white'
-  if (i %in% c(3,5)) col = 'blue'
-  hist(res[[1]][[i]]$pvals, main = names(algos)[i],
+  if (i %in% c(2,4)) col = 'blue'
+  nn = names(algos)[i]
+  hist(res[[1]][[i]]$pvals, main = nn,
        xlab = "p-values", cex.lab = 1.5, 
        cex.axis =  1.5, cex.main = 1.2, col = alpha(col, .8),
        breaks = seq(0, 1, by = 0.05)) 

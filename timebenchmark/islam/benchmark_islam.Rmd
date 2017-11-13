@@ -44,13 +44,11 @@ runDESeq2_poscounts <- function(e) {
   dds <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)),
                                 design=~ condition)
   dds <- estimateSizeFactors(dds,type="poscounts")
-  dds <- estimateDispersions(dds)
-  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard")
+  dds <- estimateDispersions(dds, minmu = 1e-3)
+  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard", minmu = 1e-3)
   res <- results(dds, name="condition_stemCell_vs_fibro")
   pvals <- res$pvalue
   padj <- res$padj
-  pvals[is.na(pvals)] <- 1
-  padj[is.na(padj)] <- 1
   logfc <- res$log2FoldChange
   list(pvals=pvals, padj=padj, logfc = logfc)
 }
@@ -91,8 +89,8 @@ runZinbwaveDESeq2 <- function(e){
   dse <- estimateSizeFactors(dse, type="poscounts")
   dimnames(weights) = NULL
   assays(dse)[["weights"]] = weights
-  dse <- estimateDispersions(dse)
-  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  dse <- estimateDispersions(dse, minmu = 1e-3)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu = 1e-3)
   resultsNames(dse)
   res = results(dse, name="conditionstemCell")
   list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
@@ -234,15 +232,15 @@ dim(islam)
 algos <- list("edgeR"           = runEdgeR,
               "edgeR-zinbwave"  = runZinbwaveEdgeR,
               "limma-voom"      = runVoom,
-              "MAST"            = runMAST,
-              "SCDE"            = runSCDE,
-              "DESeq2-poscounts"= runDESeq2_poscounts,
+              "MAST"            = runMAST)
+algos <- list("SCDE"            = runSCDE,
+              "DESeq2"          = runDESeq2_poscounts,
               "DESeq2-zinbwave" = runZinbwaveDESeq2)
 namesAlgos <- names(algos)
 names(namesAlgos) <- namesAlgos
 ```
 
-```{r,eval=FALSE}
+```{r}
 tt <- lapply(namesAlgos, function(n){
   print(n)
   timing = system.time(algos[[n]](islam))
