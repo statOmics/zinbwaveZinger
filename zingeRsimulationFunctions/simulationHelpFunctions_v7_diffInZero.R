@@ -892,8 +892,7 @@ edgeRWeightedOldF.pfun <-
     d <- estimateGLMTrendedDisp(d,design=design)
     d <- estimateGLMTagwiseDisp(d, design = design, prior.df = prior.df)
     edger.fit <- glmFit(d, design) #uses weights
-    edger.fit$df.residual <- rowSums(edger.fit$weights)-ncol(design)
-    lr <- glmWeightedF(edger.fit,coef=2,test="F")
+    lr <- zinbwave::glmWeightedF(edger.fit,coef=2)
     pval = lr$table$PValue
     padj = p.adjust(pval, "BH")
     out = cbind(pval = pval, padj = padj)

@@ -47,13 +47,6 @@ keep = rowSums(counts>0)>9
 counts=counts[keep,]
 ```
 
-```{r resultsData}
-results = data.frame(edgeR=rep(NA,11),
-                    DESeq2=rep(NA,11),
- row.names=c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH"))
-```
-
-
 
 # Methods
 ## RNA-seq methods
@@ -91,10 +84,10 @@ deGenesEdgeR
 
   colData <- data.frame(cellType = cellType, batch=batch)
   dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData, design = ~ cellType+batch)
-  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, modelMatrixType="standard", betaPrior=TRUE)
-resultsNames(dse) #for building contrasts, see ?results
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse, minmu=1e-3)
+  dse <- nbinomWaldTest(dse, modelMatrixType="standard", betaPrior=TRUE, minmu=1e-3)
+  resultsNames(dse) #for building contrasts, see ?results
 L=matrix(0,nrow=length(resultsNames(dse)),ncol=11)
 rownames(L)=resultsNames(dse)
 L[2:11,1] <- -1/10 #NF1 vs. others
@@ -147,52 +140,52 @@ lapply(resList, function(x) sum(x$padj<=0.05, na.rm=TRUE))
 ### MAST
 
 ```{r MAST}
-### copied code from FPR_mocks.Rmd on September 14, 2017.
-MAST <- function(counts, group, ylim = NULL, xlim = NULL){
-  require(MAST)
-  tpm <- counts*1e6/colSums(counts)
-  tpm <- log2(tpm+1)
-  sca <- FromMatrix(tpm,  cData=data.frame(group=group))
+counts = exprs(eset)
+tpm <- counts*1e6/colSums(counts)
+tpm <- log2(tpm+1)
+  sca <- FromMatrix(tpm,  cData=data.frame(cellType=cellType, batch=batch))
   #sca <- FromMatrix(counts,  cData=data.frame(group=group))
 
   # Adaptive thresholding from MAST vignette
-  freq_expressed <- 0.2
-  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 10, min_per_bin = 50, conditions = group)
+  freq_expressed <- 0.1
+  thres <- thresholdSCRNACountMatrix(assay(sca), nbins = 200, min_per_bin = 50, conditions = cellType)
   #par(mfrow=c(5,4))
   #plot(thres)
   assays(sca) <- list(thresh=thres$counts_threshold, tpm=assay(sca))
   expressed_genes <- freq(sca) > freq_expressed
   sca <- sca[expressed_genes,]
 
-  ngeneson <- apply(counts,2,function(x) mean(x>0))
+  ngeneson <- apply(exprs(eset),2,function(x) mean(x>0))
   CD <- colData(sca)
   CD$ngeneson <- ngeneson
   CD$cngeneson <- CD$ngeneson-mean(ngeneson)
   colData(sca) <- CD
   ## differential expression
-  fit <- zlm(~ cngeneson + group , sca = sca)
-  lrFit <- lrTest(fit, 'group')
-  pval <- lrFit[, 'hurdle', 'Pr(>Chisq)']
-  padj <- p.adjust(pval, method = "BH")
-
-  ### MAST filtered the genes, so make a list that is consistent with the original count matrix.
-  pvalAll = vector(length=nrow(counts))
-  pvalAll[] = 1
-  names(pvalAll)=rownames(counts)
-  pvalAll[match(names(pval),names(pvalAll))] = pval
-
-  padjAll = vector(length=nrow(counts))
-  padjAll[] = 1
-  names(padjAll)=rownames(counts)
-  padjAll[match(names(padj),names(padjAll))] = padj
-
-  out = cbind(pval = pvalAll, padj = padjAll, logfc = NA)
-  return(out)
-}
+  fit <- zlm(~ cellType + batch + cngeneson, sca = sca)
+  ### contrasts
+  L <- matrix(0,nrow=ncol(fit@coefC),ncol=11)
+  rownames(L) <- colnames(fit@coefC)
+  colnames(L) <- c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH")
+  L[2:11,1] <- -1/10 #NF1 vs. others
+  L[2:11,2] <- c(1,rep(-1/10,9)) #NF2 vs. others
+  L[2:11,3] <- c(-1/10,1,rep(-1/10,8)) #NF3 vs. others
+  L[2:11,4] <- c(rep(-1/10,2),1,rep(-1/10,7)) #NF4 vs. others
+  L[2:11,5] <- c(rep(-1/10,3),1,rep(-1/10,6)) #NF5 vs. others
+  L[2:11,6] <- c(rep(-1/10,4),1,rep(-1/10,5)) #NP1 vs. others
+  L[2:11,7] <- c(rep(-1/10,5),1,rep(-1/10,4)) #NP2 vs. others
+  L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
+  L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
+  L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
+  L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
+  lrFitList = list()
+  for(i in 1:ncol(L)) lrFitList[[i]] <- lrTest(fit, L[,i,drop=FALSE])
+  pval = lapply(lrFitList, function(x) x[, 'hurdle', 'Pr(>Chisq)'])
+  padj = lapply(pval, function(x) p.adjust(x,"BH"))
+  unlist(lapply(padj, function(x) sum(x<=0.05)))
 
 ```
 
-### zinbwave_edgeR
+### zinbwave
 
 ```{r}
 core <- SummarizedExperiment(counts,
@@ -230,8 +223,6 @@ padjListZinbEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
 deGenesZinbEdgeR
 
-
-
 ```
 
 ### zinbwave-DESeq2
@@ -241,8 +232,8 @@ deGenesZinbEdgeR
   dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData, design = ~ cellType+batch)
   assays(dse)[["weights"]]=weights
   dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, modelMatrixType="standard", betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-13)
+  dse <- estimateDispersions(dse,minmu=1e-3)
+  dse <- nbinomWaldTest(dse, modelMatrixType="standard", betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-13, minmu=1e-3)
 resultsNames(dse) #for building contrasts, see ?results
 L=matrix(0,nrow=length(resultsNames(dse)),ncol=11)
 rownames(L)=resultsNames(dse)
@@ -260,5 +251,41 @@ L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
 resList=list()
 for(i in 1:ncol(L)) resList[[i]] = results(dse,contrast=L[,i])
 lapply(resList, function(x) sum(x$padj<=0.05, na.rm=TRUE))
+```
+
+## plot results
+
+```{r resultsData}
+results = data.frame(
+  nrGenes = c(46 , 106 , 3 , 37 , 105 , 415 , 2 , 3 , 54 , 1 , 381, #scde
+            396 , 272 , 529 , 394 , 409 , 1355 , 590 , 241 , 424 , 370 , 1425, #MAST
+            6944 , 5128 , 5154 , 801 , 4021 , 2422 , 6724 , 202 , 9388 , 153 , 5735, #limma
+            640 , 711 , 186 , 289 , 589 , 1356 , 530 , 316 , 1691 , 75 , 1652, #DESeq2
+            522 , 1011 , 348 , 419 , 1216 , 1915 , 762 , 376 , 2203 , 142 , 3087, #ZINB deseq2
+            860 , 1375 , 401 , 654 , 1149 , 1942 , 933 , 380 , 1909 , 403 , 2458, #egdeR
+            495 , 772 , 241 , 508 , 959 , 1802 , 967 , 464 , 2376 , 193 , 2919), #zinb edger
+    contrast=rep(c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH"),7),
+    method=rep(c("SCDE","MAST","limma-voom","DESeq2","ZINB-WaVE_DESeq2", "edgeR","ZINB-WaVE_edgeR"),each=11))
+results$method=factor(results$method,levels=c("SCDE","MAST","DESeq2","ZINB-WaVE_DESeq2","edgeR","ZINB-WaVE_edgeR","limma-voom"))
+
+# library(lattice) ; library(grid)
+# barchart(log10(nrGenes)~contrast,groups=method,data=results, col=c("grey","darkturquoise","brown","darkseagreen","red","salmon","blue"), page = function(n)
+#            grid.text(c("SCDE","MAST", "DESeq2", "ZINB-DESeq2", "edgeR", "ZINB-edgeR", "limma-voom"),
+#                      x = seq(0.06,0.9,length=7), y = rep(.9,2),
+#                      default.units = "npc"
+#                      ,just = c("left", "top")))
+
+library(ggplot2)
+# Grouped
+ggplot(results, aes(fill=method, y=log(nrGenes), x=contrast)) + geom_bar(position="dodge", stat="identity") +  scale_fill_manual(values = c("grey","darkturquoise","brown","darkseagreen","red","salmon","blue") )+ theme_bw()
+
+# facets
+ggplot(results, aes(fill=method, y=log10(nrGenes), x=1)) + geom_bar(position="dodge", stat="identity") + facet_wrap(~contrast) +  scale_fill_manual(values = c("grey","darkturquoise","brown","darkseagreen","red","salmon","blue") ) + theme_bw() + theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) + ylab("log10(number of significant genes)")
+
+
+
+
 
 ```

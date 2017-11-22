@@ -206,9 +206,9 @@ DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   colData <- data.frame(group = group)
   dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
   colData(dse)$group <- as.factor(colData(dse)$group)
-  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior=TRUE)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse, minmu=1e-3)
+  dse = nbinomLRT(dse, minmu=1e-3, reduced=~1)
   rr <- results(dse)
   cbind(pval = rr$pvalue, padj = rr$padj)
 }
@@ -350,22 +350,18 @@ Seurat <- function(counts, group, xlim=NULL, ylim=NULL){
 }
 ```
 
-## zingeR-edgeR
-```{r}
-zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
-  require(zingeR)
-  d <- DGEList(counts)
-  d <- suppressWarnings(edgeR::calcNormFactors(d))
-  design <- model.matrix(~ group)
-  weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 500, normalization = "TMM", verbose = TRUE, plotW=FALSE)
-  d$weights <- weights
-  d <- estimateDisp(d, design)
-  plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
-  fit <- glmFit(d,design)
-  lrt <- zingeR::glmWeightedF(fit, coef = 2, independentFiltering = TRUE)
-  cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
+```{r DEsingle}
+#https://github.com/miaozhun/DEsingle downloaded on November 20, 2017
+DEsingle <- function(counts, group, xlim=NULL, ylim=NULL){
+  require(DEsingle)
+  res = DEsignle(counts=counts, group=group)
+  pval = res[,"pvalue"]
+  padj = res[,"pvalue.adj.FDR"]
+  out=cbind(pval,padj)
+  return(out)
 }
 ```
+
 
 ## zinbwave
 
@@ -377,32 +373,19 @@ registerDoParallel(NCORES)
 register(DoparParam())
 ```
 
-```{r zinbwaveWeights}
-computeZinbwaveWeights <- function(zinb, counts){
-  mu <- getMu(zinb)
-  pi <- getPi(zinb)
-  theta <- getTheta(zinb)
-  theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
-  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
-  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
-  t(zinbwg)
-}
-```
-
 ### zinbwave-edgeR
 ```{r}
 zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main = 'ZINB-WaVE'){
   d=DGEList(counts)
   d=suppressWarnings(edgeR::calcNormFactors(d))
-  design=model.matrix(~group + cellLevelIct)
-  weights <- computeZinbwaveWeights(zinb, counts)
+  design=model.matrix(~group)
+  weights <- computeObservationalWeights(zinb, counts)
   weights[weights==0] = 1e-15 #errors with zero weights
   d$weights <- weights
   d=estimateDisp(d, design)
   plotBCV(d, ylim = ylim, main = main)
   fit=glmFit(d,design)
-  lrt=zingeR::glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
   cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
 }
 ```
@@ -413,12 +396,13 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, counts)
+  weights <- computeObservationalWeights(zinb, counts)
   weights[weights<1e-6] = 1e-6
   assays(dse)[["weights"]]=weights
-  dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse = estimateDispersions(dse)
-  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  dse = estimateSizeFactors(dse, type="poscounts")
+  dse = estimateDispersions(dse, minmu=1e-3)
+  #dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu=1e-3)
+  dse = nbinomLRT(dse, minmu=1e-3, reduced=~1)
   res = results(dse)
   cbind(pval = res$pvalue, padj = res$padj)
 }
@@ -429,7 +413,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 zinbwave_limma <- function(counts, group, zinb){
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- computeZinbwaveWeights(zinb, counts)
+  zeroWeights <- computeObservationalWeights(zinb, counts)
   y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
             weights = zeroWeights)
   y$weights <- y$weights * zeroWeights
@@ -524,7 +508,6 @@ qqplot(zinbwave_c_weights, zinbwave_g_weights, type = 'o',
 abline(a=0,b=1)
 ```
 
-
 ## nDE, TPR, FDR (adjusted pvalue = 0.05)
 ```{r tenxTableFC2, results = 'asis'}
 listRates = lapply(res, function(y){
@@ -570,7 +553,7 @@ colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 #save(cobraplot,file="cobraPlot10x.rda")
 #png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_allMethods.png", width=7,height=8, units="in", res=300)
-plot_fdrtprcurve(cobraplot, pointsize=2)
+plot_fdrtprcurve(cobraplot, pointsize=2) + xlab("FDP")
 #dev.off()
 
 # no genewise zinbwave

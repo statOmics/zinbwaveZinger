@@ -96,8 +96,3 @@ tenxPlot=plot_fdrtprcurve(cobraplot, pointsize=2, xaxisrange=c(0,0.41), yaxisran
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_cutoff_noLimma.png", width=7,height=8, units="in", res=300)
 tenxPlot
 dev.off()
-
-
-
-
-## make 3-panel plots (islam, trapnell, 10x) for different epsilon values. One for edgeR, one for DESeq2

@@ -121,7 +121,7 @@ DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   colData(dse)$group <- as.factor(colData(dse)$group)
   dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior=TRUE)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE, minmu=1e-3)
   rr <- results(dse)
   cbind(pval = rr$pvalue, padj = rr$padj)
 }
@@ -268,88 +268,10 @@ Seurat <- function(counts, group, xlim=NULL, ylim=NULL){
 }
 ```
 
-## zingeR
-
-Counts are modelled as ZINB. Weights are posterior probabilities that a count belongs to the count component given that the count and library size is observed. Parameters are estimated using EM algorithm. See http://www.biorxiv.org/content/early/2017/06/30/157982 for more details.
-
-### zingeR-edgeR
-```{r zingeR-edgeR}
-zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
-  require(zingeR)
-  d <- DGEList(counts)
-  d <- suppressWarnings(edgeR::calcNormFactors(d))
-  design <- model.matrix(~ group)
-  weights <- zeroWeightsLS(counts = d$counts, design = design, maxit = 200,
-                           normalization = "TMM", verbose = F)
-  d$weights <- weights
-  d <- estimateDisp(d, design)
-  plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
-  fit <- glmFit(d,design)
-  lrt <- glmWeightedF(fit, coef = 2, independentFiltering = TRUE)
-  cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
-}
-```
-
-### zingeR-DESeq2
-```{r zingeR-deseq2}
-zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
-  require(zingeR)
-  colData <- data.frame(group = group)
-  design <- model.matrix(~ group)
-  dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData,
-                                design = ~group)
-  weights <- zeroWeightsLS(counts = counts, design = design, maxit = 200,
-                           normalization = "DESeq2_poscounts", colData = colData,
-                           designFormula = ~group, verbose = F)
-  assays(dse)[["weights"]] <- weights
-  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior = TRUE, useT = TRUE,
-                        df = rowSums(weights) - 2)
-  rr <- results(dse)
-  cbind(pval = rr$pvalue, padj = rr$padj)
-}
-```
-
-### zingeR-limma-voom-filtered
-```{r zinger-limmavoom}
-zingeR_limma <- function(counts, group, ylim = NULL, xlim = NULL){
-  require(zingeR)
-  design <- model.matrix(~group)
-  nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- zeroWeightsLS(counts=counts, design=design, maxit = 200,
-                               verbose = FALSE)
-  y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
-            weights = zeroWeights)
-  y$weights <- y$weights*zeroWeights
-  fit <- lmFit(y, design, weights=y$weights)
-  fit$df.residual <- rowSums(zeroWeights) - ncol(design)
-  fit <- eBayes(fit)
-  tt <- topTable(fit,coef=2,n=nrow(counts), sort.by = "none")
-  pval <- tt$P.Value
-  baseMean = unname(rowMeans(sweep(counts,2,nf,FUN="*")))
-  hlp <- pvalueAdjustment_kvdb(baseMean=baseMean, pValue=pval)
-  padj <- hlp$padj
-  cbind(pval = pval, padj = padj)
-}
-```
 
 ## zinbwave
 
 We compute the same weights as zingeR (i.e. posterior probabilities that a count belongs to the count component given that the count and library size is observed), but using the ZINB-WaVE estimation procedure. See more details here (http://www.biorxiv.org/content/early/2017/04/06/125112).
-
-```{r zinbwaveWeights}
-computeZinbwaveWeights <- function(zinb, counts){
-  mu <- getMu(zinb)
-  pi <- getPi(zinb)
-  theta <- getTheta(zinb)
-  theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
-  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
-  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
-  t(zinbwg)
-}
-```
 
 ### zinbwave-edgeR
 ```{r zinbwaveedger}
@@ -357,7 +279,7 @@ zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main =
   d=DGEList(counts)
   d=suppressWarnings(edgeR::calcNormFactors(d))
   design=model.matrix(~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeObservationalWeights(zinb, d$counts)
   d$weights <- weights
   d=estimateDisp(d, design)
   plotBCV(d, ylim = ylim, main = main)
@@ -373,12 +295,12 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, counts(dse))
+  weights <- computeObservationalWeights(zinb, counts(dse))
   weights[weights<1e-6] = 1e-6 #prevent sanity check error for weights
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
   dse = estimateDispersions(dse)
-  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu=1e-3)
   res = results(dse)
   cbind(pval = res$pvalue, padj = res$padj)
 }
@@ -389,7 +311,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 zinbwave_limma <- function(counts, group, zinb){
   design <- model.matrix(~group)
   nf <- edgeR::calcNormFactors(counts)
-  zeroWeights <- computeZinbwaveWeights(zinb, counts)
+  zeroWeights <- computeObservationalWeights(zinb, counts)
   y <- voom(counts, design, plot=FALSE, lib.size = colSums(counts)*nf,
             weights = zeroWeights)
   y$weights <- y$weights * zeroWeights
@@ -588,357 +510,16 @@ cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 save(cobraplot,file="cobraplotTrapnellNoLimma.rda")
 plot_fdrtprcurve(cobraplot, pointsize=1)
 
-
-
-
-# res10 = res[1:10]
-# names(res10) = gsub('_common', '', names(res10))
-# pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res10, '[[', 1))),
-#                padj = as.data.frame(do.call(cbind, lapply(res10, '[[', 2))),
-#                truth = data.frame(status = trueDE))
-# cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-#
-# reds = brewer.pal(11, "RdYlGn")[1:3]
-# blues = rev(brewer.pal(11, "RdYlBu"))[1:3]
-# brown =  brewer.pal(8, "Dark2")[4]
-# greens = rev(brewer.pal(11, "PiYG"))[1:3]
-# mycol = c(blues[1], greens[1], reds[1], brown, blues[2], greens[2], reds[2],
-#           blues[3], greens[3], reds[3], 'black')
-# names(mycol) = c(names(res10), 'truth')
-# names(cobraperf@overlap) = names(mycol)
-# colsCobra <- mycol[match(sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)]), names(mycol))]
-# cobraplot <- prepare_data_for_plot(cobraperf, colorscheme = colsCobra,
-#                                    facetted = FALSE)
-#
-# p1 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
-#                        linewidth = .5, xaxisrange = c(0, .5)) +
-#   theme(axis.text.x = element_text(size = 10),
-#         axis.text.y = element_text(size = 10),
-#         axis.title.x = element_text(size = 15),
-#         axis.title.y = element_text(size = 15),
-#         legend.text=element_text(size=7)) + theme(legend.position="none")
-#
-# orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
-# p2 <- plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,
-#                        linewidth = .5, xaxisrange = c(0, .5)) +
-#   theme(legend.text=element_text(size=7)) +
-#   scale_color_manual(labels = names(colsCobra)[orderLegend],
-#                      values = unname(colsCobra)[orderLegend],
-#                      name = 'Method')
-# legend <- get_legend(p2)
-#
-# #pdf("../../draftOverleaf/10963157vrrwqjqjdrnf/performanceIslamfc2.pdf")
-# plot_grid(p1, legend, nrow = 1, ncol = 2, rel_widths = c(1, .4))
-# #dev.off()
-
 ```
 
 ## Distribution of pvalues
 
 ```{r trapnellPvalues}
 png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/pvalsTrapnellSim.png", width=9,height=9, units="in", res=300)
-ylim = c(0, 3000)
+ylim = c(0, 5000)
 par(mfrow = c(4,4), mar=c(3,2,1,1))
 hist = lapply(1:length(res), function(i){
   hist(res[[i]][,'pval'], main = names(res)[i], ylim = ylim, xlab = 'pvalues', breaks=seq(0,1,0.05))
 })
 dev.off()
-```
-
-
-# JUNK
-
-
-```{r junkKoen}
-#
-# # getExprFraction4 = function(counts, offset){
-# #     countsModel = counts[counts>0]
-# #     offsetModel = offset[counts>0]
-# #   sum(countsModel)/sum(offsetModel)
-# # }
-#
-# getExprFraction4 = function(counts, offset){
-#     countsModel = counts[counts>0]
-#     offsetModel = offset[counts>0]
-#     lambda = sum(countsModel)/sum(offsetModel)
-#     lambda*(1-mean(counts==0))
-# }
-#
-# # getPhiMoMPositive4 = function(counts, lambda, offset){
-# #     countsModel = counts[counts>0]
-# #     offsetModel = offset[counts>0]
-# #     mu=lambda*offsetModel
-# #     phi = (sum(countsModel^2) - sum(mu^2) - sum(mu)) / sum(mu^2)
-# #     return(phi)
-# # }
-#
-# getPhiMoMPositive4 = function(counts, lambda, offset){
-#     countsModel = counts[counts>0]
-#     offsetModel = offset[counts>0]
-#     mu=lambda*offsetModel
-#     phi = (sum(countsModel^2 * (1-mean(counts==0))) - sum(mu^2) - sum(mu)) / sum(mu^2)
-#     return(phi)
-# }
-#
-#
-# # reEstimateExprFraction4 = function(counts, offset, lambda, phi){
-# #     countsModel = counts[counts>0]
-# #     offsetModel = offset[counts>0]
-# #     mu=lambda*offsetModel
-# #   sum(countsModel*(1-dnbinom(0,mu=mu,size=1/phi)))/sum(offsetModel)
-# # }
-# #
-# # reEstimatePhiMoM4 = function(counts, lambda, offset, phi){
-# #     countsModel = counts[counts>0]
-# #     offsetModel = offset[counts>0]
-# #     mu=lambda*offsetModel
-# #     phi = (sum(countsModel^2 * (1-dnbinom(0,mu=mu,size=1/phi))) - sum(mu^2) - sum(mu)) / sum(mu^2)
-# #     return(phi)
-# # }
-#
-#
-#
-# getDatasetMoMPositive = function(counts, drop.extreme.dispersion = 0.1, cpm= "AveLogCPM", MoMIter=10){
-#
-#   #### estimate lambda and overdispersion based on ZTNB.
-# 	d <- DGEList(counts)
-# 	cp <- cpm(d,normalized.lib.sizes=TRUE)
-# 	dFiltered=d
-# 	dFiltered <- edgeR::calcNormFactors(dFiltered)
-#   dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
-#   ## estimate
-#   lambdaMoM=apply(dFiltered$counts,1,function(x) getExprFraction4(counts=x, offset=colSums(dFiltered$counts)))
-#   dispMoM = vector(length=nrow(dFiltered$counts))
-#   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = getPhiMoMPositive4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i])
-#   dispMoM[dispMoM<0] = sample(dispMoM[dispMoM>0],sum(dispMoM<0),replace=TRUE) #sample from the non-zero dispersion
-#
-#   ### old code: iteratively estimating
-#   #dispMoM[dispMoM<0] = 1
-# #   for(j in 1:MoMIter){
-# #   for(i in 1:nrow(dFiltered$counts)) lambdaMoM[i] = reEstimateExprFraction4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), phi=dispMoM[i], lambda=lambdaMoM[i])
-# #   for(i in 1:nrow(dFiltered$counts)) dispMoM[i] = reEstimatePhiMoM4(counts=dFiltered$counts[i,], offset=colSums(dFiltered$counts), lambda=lambdaMoM[i], phi=dispMoM[i])
-# # hist(dispMoM) ; message(paste("mean below zero",mean(dispMoM<0)))
-# #   if(j < MoMIter) dispMoM[dispMoM<0] = 1 #except for last iteration
-# #   }
-#   ### end old code
-#
-#   ## assume convergence
-#   params=cbind(dispMoM,lambdaMoM)
-# 	rmRows = which(params[,2]>1) #impossibly high lambda
-# 	rmRows2 = which(params[,2]==0) #zero lambda
-# 	naRows = which(apply(params,1, function(row) any(is.na(row)))) #not fitted
-# 	nonZeroDispRows = which(params[,1]<0 | params[,1]==0) #negative dispersion
-# 	throwRows = c(rmRows,rmRows2,naRows,nonZeroDispRows)
-#   if(length(throwRows)>0) params = params[-throwRows,]
-#
-# 	### estimate logistic GAM P(zero) ~ s(aveLogCPM) + logLibSize
-# 	### use unfiltered data for this model.
-#   require(mgcv)
-# 	propZero = colMeans(counts==0)
-# 	propZeroGene = rowMeans(counts==0)
-# 	d <- DGEList(counts)
-# 	d <- edgeR::calcNormFactors(d)
-# 	avCpm <- aveLogCPM(d, normalized.lib.sizes=TRUE)
-# 	cpmHist = hist(avCpm, breaks=150, plot=FALSE)
-#     	breaks = cpmHist$breaks
-#     	mids = cpmHist$mids
-#     	midsHlp=rep(mids,ncol(d$counts))
-# 	logLibSize = log(colSums(counts)*d$samples$norm.factors)
-#     	logLibHlp=rep(logLibSize,each=length(mids))
-# 	binHlp=sapply(breaks[-length(breaks)],function(x) avCpm>x)
-#   	binId=apply(binHlp,1,function(x) max(which(x)))
-# 	nonNullCounts = t(sapply(1:length(mids), function(bin){
-# 			    binRows <- binId==bin
-# 			    if(sum(binRows)==0) rep(0,ncol(counts)) else
-# 			    if(sum(binRows)==1) (counts[which(binRows),]!=0)*1 else
-# 				colSums(counts[which(binRows),]!=0)
-# 	    }))
-# 	nullCounts = t(sapply(1:length(mids), function(bin){
-# 		    	binRows <- binId==bin
-# 		    	if(sum(binRows)==0) rep(0,ncol(counts)) else
-# 		    	if(sum(binRows)==1) (counts[which(binRows),]==0)*1 else
-# 			    colSums(counts[which(binRows),]==0)
-# 	    }))
-# 	expectCounts=cbind(c(nullCounts),c(nonNullCounts))
-# 	#zeroFit=mgcv::gam(expectCounts~s(midsHlp)+logLibHlp,family=binomial)
-# 	zeroFit=gam(expectCounts~s(midsHlp,by=logLibHlp),family=binomial)
-#
-# 	### drop extreme dispersions
-#   dFiltered$AveLogCPM <- aveLogCPM(dFiltered, normalized.lib.sizes=TRUE)
-# 	if(length(throwRows)>0) dFiltered$AveLogCPM <- dFiltered$AveLogCPM[-throwRows]
-# 	if(length(throwRows)>0) propZeroGene = propZeroGene[-throwRows]
-# 	params=data.frame(dispersion=params[,1], lambda=params[,2], aveLogCpm=dFiltered$AveLogCPM, propZeroGene=propZeroGene)
-# 	dispersion <- params$dispersion
-# 	AveLogCPM <- params$aveLogCpm
-# 	lambda <- params$lambda
-# 	propZeroGene <- params$propZeroGene
-#
-# 	if(is.numeric(drop.extreme.dispersion))
-# 	{
-# 		bad <- quantile(dispersion, 1-drop.extreme.dispersion, names = FALSE, na.rm=TRUE)
-# 		ids <- dispersion <= bad
-# 		AveLogCPM <- AveLogCPM[ids]
-# 		dispersion <- dispersion[ids]
-# 		lambda <- lambda[ids]
-# 		propZeroGene <- propZeroGene[ids]
-# 		params <- params[ids,]
-# 		dFiltered <- dFiltered[ids,]
-# 	}
-# 	#lambda=lambda/sum(lambda) #make sure they sum to 1
-# 	dataset.AveLogCPM <- AveLogCPM
-# 	dataset.dispersion <- dispersion
-# 	dataset.lambda <- lambda
-# 	dataset.propZeroGene <- propZeroGene
-# 	dataset.lib.size <- d$samples$lib.size
-# 	dataset.nTags <- nrow(d)
-# 	list(dataset.AveLogCPM = dataset.AveLogCPM, dataset.dispersion = dataset.dispersion, dataset.lib.size = dataset.lib.size, dataset.nTags = dataset.nTags, dataset.propZeroFit=zeroFit, dataset.lambda=lambda, dataset.propZeroGene=propZeroGene, dataset.breaks = breaks, dataset.cpm=cpm)
-# }
-#
-#
-# NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group), lib.size = NULL, drop.low.lambda = TRUE, drop.extreme.dispersion = 0.1, pUp=.5, foldDiff=3, verbose=TRUE, ind=NULL, params=NULL, cpm="AveLogCPM", max.dispersion=400, min.dispersion=0.1, normalizeLambda=FALSE)
-# {
-#   require(edgeR)
-#   group = as.factor(group)
-#   expit=function(x) exp(x)/(1+exp(x))
-#   logit=function(x) log(x/(1-x))
-#
-#   sample.fun <- function(object)
-#   {
-#     nlibs <- object$nlibs
-#     nTags <- object$nTags
-#     AveLogCPM <-object$dataset$dataset.AveLogCPM
-#     dispersion <- object$dataset$dataset.dispersion
-#     lambda <- object$dataset$dataset.lambda
-#     #lambda <- (2^AveLogCPM)/1e6
-#     propZeroGene <- dat$dataset$dataset.propZeroGene
-#     id_r <- sample(length(AveLogCPM), nTags, replace = TRUE)
-#     object$AveLogCPM <- AveLogCPM[id_r]
-#     Lambda <- lambda[id_r]
-#     if(normalizeLambda) Lambda <- Lambda/sum(Lambda) #normalize so they all sum to 1
-#     Dispersion <- dispersion[id_r]
-#     Dispersion[Dispersion>max.dispersion] = max.dispersion
-#     Dispersion[Dispersion<min.dispersion] = min.dispersion
-#     propZeroGene <- propZeroGene[id_r]
-#     Lambda <- expandAsMatrix(Lambda, dim = c(nTags, nlibs))
-#     object$Lambda <- Lambda
-#     Dispersion <- expandAsMatrix(Dispersion, dim = c(nTags, nlibs))
-#     object$Dispersion <- Dispersion
-#     object$propZeroGene <- propZeroGene
-#     object
-#   }
-#   diff.fun <- function(object)
-#   {
-#     group <- object$group
-#     pUp <-  object$pUp
-#     foldDiff <- object$foldDiff
-#     Lambda <- object$Lambda
-#     nTags <- object$nTags
-#     g <- group == levels(group)[1]
-#     #AveLogCPM = expandAsMatrix(object$AveLogCPM,dim=c(nTags, nlibs))
-#     if(length(ind)>0 & !all(foldDiff==1)) {
-#       fcDir <- sample(c(-1,1), length(ind), prob=c(1-pUp,pUp), replace=TRUE)
-#       Lambda[ind,g] <- Lambda[ind,g]*exp(log(foldDiff)/2*fcDir)
-#       Lambda[ind,!g] <- Lambda[ind,!g]*exp(log(foldDiff)/2*(-fcDir))
-#       object$Lambda <- Lambda
-#       object$indDE <- ind
-#       object$indNonDE <- (1:nTags)[-ind]
-#       foldDiff[fcDir==1] <- 1/foldDiff[fcDir==1]
-#       object$foldDiff <- foldDiff #group2 / group1
-#     }
-#     if(all(foldDiff==1)) object$indDE <- NA
-#     object
-#   }
-#   sim.fun <- function(object)
-#   {
-#     Lambda <- object$Lambda
-#     Dispersion <- object$Dispersion
-#     nTags <- object$nTags
-#     nlibs <- object$nlibs
-#     lib.size <- object$lib.size
-#     zeroFit <- dat$dataset$dataset.propZeroFit
-#     propZeroGene <- dat$propZeroGene
-#     propZeroGene[propZeroGene==1] <- 1-1e-4
-#     propZeroGene[propZeroGene==0] <- 1e-4
-#     design <- object$design
-#     avLogCpm <- object$AveLogCPM
-#     mids <- object$dataset$dataset.mids
-#     breaks <- object$dataset$dataset.breaks
-#
-#     ## get matrix of zero probabilities
-#     libPredict=rep(log(lib.size),each=length(avLogCpm))
-#     cpmPredict=rep(avLogCpm,length(lib.size))
-#     zeroProbMatLink = matrix(predict(zeroFit, newdata=data.frame(logLibHlp=libPredict, midsHlp=cpmPredict), type="link"), byrow=FALSE, ncol=nlibs, nrow=nTags)
-#     meanDiff = rowMeans(zeroProbMatLink)-logit(propZeroGene)
-#     zeroProbMat = expit(sweep(zeroProbMatLink,1,meanDiff,"-"))
-#     #zeroProbMat = matrix(predict(zeroFit, newdata=data.frame(logLibHlp=libPredict, midsHlp=cpmPredict), type="response"), byrow=FALSE, ncol=nlibs)
-#
-#     ## simulate negative binomial counts
-#     mu=sweep(Lambda,2,lib.size,"*")
-#     #adjustment = zeroProbMat*mu
-#     #mu=mu+adjustment
-#     #mu[mu<0.1] = 0.1
-#     #counts = matrix(rnbinom(n=nTags*nlibs, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
-#     zeroProbNegBin = matrix(dnbinom(0, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
-#     expectedZeroProbablityNegBinomial = rowMeans(zeroProbNegBin)
-#     dropoutGenes = expectedZeroProbablityNegBinomial < rowMeans(zeroProbMat)
-#     adjustment = zeroProbMat*mu
-#     mu[dropoutGenes,]=mu[dropoutGenes,]+adjustment[dropoutGenes,]
-#     mu[mu<0.1] = 0.1
-#     counts = matrix(rnbinom(n=nTags*nlibs, mu=mu, size=1/Dispersion), nrow=nTags, ncol=nlibs, byrow=FALSE)
-#
-#
-#
-#
-#     ## calculate dropouts
-#     message(paste0("Adding extra zeros w.r.t. NB for ",sum(dropoutGenes)," genes"))
-#     #dropout matrix is 0 for dropout.
-#     dropoutMatrix = 1-matrix(rbinom(n=nTags*nlibs, size=1, prob=zeroProbMat), nrow=nTags, ncol=nlibs, byrow=FALSE)
-#     dropoutMatrix[!dropoutGenes,] = 1
-#     #avoid all dropout genes
-#     allDropoutId <- which(rowSums(dropoutMatrix)==0)
-#     while(length(allDropoutId)>0 ){
-#       dropoutMatrix[allDropoutId,] = 1-matrix(rbinom(n=length(allDropoutId)*nlibs, size=1, prob=zeroProbMat[allDropoutId,]), nrow=length(allDropoutId), ncol=nlibs, byrow=FALSE)
-#       allDropoutId <- which(rowSums(dropoutMatrix)==0)
-#     }
-#     #add dropouts
-#     counts = counts*dropoutMatrix
-#     object$dropout = dropoutMatrix
-#
-#     ## resample counts for features with all zero counts
-#     zeroCountsId <- which(rowSums(counts)==0)
-#     while(length(zeroCountsId)>0 ){
-#       counts[zeroCountsId,] = matrix(rnbinom(n=length(zeroCountsId)*nlibs, mu=mu[zeroCountsId,], size=1/Dispersion[zeroCountsId,]), nrow=length(zeroCountsId), ncol=nlibs, byrow=FALSE)
-#       counts[zeroCountsId,]=counts[zeroCountsId,]*dropoutMatrix[zeroCountsId,]
-#       zeroCountsId <- which(rowSums(counts)==0)
-#     }
-#
-#     ## name features, return object.
-#     rownames(counts) <- paste("ids", 1:nTags, sep = "")
-#     colnames(counts) <- paste("sample",1:nlibs,sep="")
-#     object$counts <- counts
-#     object
-#   }
-#
-#   if(verbose) message("Preparing dataset.\n")
-#   if(is.null(params)){
-#     dataset <- getDatasetZTNB(counts = dataset, drop.extreme.dispersion = drop.extreme.dispersion, drop.low.lambda = drop.low.lambda)
-#   } else {
-#     dataset <- params
-#   }
-#   dat <- new("DGEList", list(dataset = dataset, nTags = nTags, lib.size = lib.size, nlibs = nlibs, group = group, design = model.matrix(~group), pUp = pUp, foldDiff = foldDiff))
-#   if(cpm=="aCpm") dat$dataset$dataset.AveLogCPM = dat$dataset$dataset.aCpm
-#
-#
-#   if(is.null(dat$lib.size)){
-#     dat$lib.size <- sample(dataset$dataset.lib.size, nlibs, replace=TRUE)}
-#   if(is.null(nTags)) dat$nTags <- dat$dataset$dataset.nTags
-#   if(verbose) message("Sampling.\n")
-#   dat <- sample.fun(dat)
-#   if(verbose) message("Calculating differential expression.\n")
-#   dat <- diff.fun(dat)
-#   if(verbose) message("Simulating data.\n")
-#   dat <- sim.fun(dat)
-#   dat
-# }
-
 ```

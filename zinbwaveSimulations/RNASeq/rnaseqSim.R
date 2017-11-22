@@ -46,22 +46,12 @@ DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   cbind(pval = rr$pvalue, padj = rr$padj)
 }
 
-computeZinbwaveWeights <- function(zinb, counts){
-  mu <- getMu(zinb)
-  pi <- getPi(zinb)
-  theta <- getTheta(zinb)
-  theta_mat <- matrix(rep(theta, each = ncol(counts)), ncol = nrow(counts))
-  nb_part <- dnbinom(t(counts), size = theta_mat, mu = mu)
-  zinb_part <- pi * ( t(counts) == 0 ) + (1 - pi) *  nb_part
-  zinbwg <- ( (1 - pi) * nb_part ) / zinb_part
-  t(zinbwg)
-}
 
 zinbwave_edgeR <- function(counts, group, zinb, ylim = NULL, xlim = NULL, main = 'ZINB-WaVE'){
   d=DGEList(counts)
   d=suppressWarnings(edgeR::calcNormFactors(d))
   design=model.matrix(~group)
-  weights <- computeZinbwaveWeights(zinb, d$counts)
+  weights <- computeObservationalWeights(zinb, d$counts)
   d$weights <- weights
   d=estimateDisp(d, design)
   plotBCV(d, ylim = ylim, main = main)
@@ -74,7 +64,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   colData=data.frame(group=group)
   design=model.matrix(~group)
   dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
-  weights <- computeZinbwaveWeights(zinb, counts(dse))
+  weights <- computeObservationalWeights(zinb, counts(dse))
   dimnames(weights)=NULL
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
@@ -85,7 +75,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
 }
 
 
-library(zinbwave) ; library(DESeq2)
+library(zinbwave) ; library(DESeq2) ; library(doParallel) ; library(BiocParallel)
 NCORES <- 2
 registerDoParallel(NCORES)
 register(DoparParam())
@@ -133,6 +123,57 @@ cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 plot_fdrtprcurve(cobraplot, pointsize=2)
+
+
+## compare total variance
+#edgeR
+counts=dataNoZI$counts
+group=grp
+d <- DGEList(counts)
+d <- suppressWarnings(edgeR::calcNormFactors(d))
+design <- model.matrix(~group)
+d <- estimateDisp(d, design)
+fitEdger=glmFit(d,design)
+#zinbwave-edger
+d=DGEList(counts)
+d=suppressWarnings(edgeR::calcNormFactors(d))
+design=model.matrix(~group)
+zinb=zinbCommonNoZI
+weights=computeObservationalWeights(zinb,d$counts)
+d$weights <- weights
+d=estimateDisp(d, design)
+fitZinb=glmFit(d,design)
+#zinger_edger
+d=DGEList(counts)
+d=suppressWarnings(edgeR::calcNormFactors(d))
+design=model.matrix(~group)
+wZinger = zingeR::zeroWeightsLS(counts, design, maxit=200)
+
+zinbDefaultEps <- zinbFit(core, X = '~ grp', commondispersion = TRUE)
+weightDefaultEps = computeObservationalWeights(zinbDefaultEps,counts)
+
+## dispersion
+plot(x=log(fitEdger$dispersion),y=log(fitZinb$dispersion), pch=16, cex=1/2,xlab="NB dispersion", ylab="ZINB dispersion", col=rowSums(counts==0)+1) ; abline(0,1,col=2)
+legend("topleft",c("0 zeros","1 zero","2 zeros", "3 zeros"), col=1:4, bty="n", pch=16, cex=1/2)
+
+## ZINB vs NB var
+varTotalNB = fitEdger$fitted.values + fitEdger$dispersion+(fitEdger$fitted.values)^2
+piZINB = t(getPi(zinbCommonNoZI))
+varTotalZINB=(1-piZINB)*fitZinb$fitted.values*(1+fitZinb$fitted.values*(fitZinb$dispersion+piZINB))
+library(RColorBrewer)
+cols=brewer.pal(n=8,"Dark2")
+plot(x=log(varTotalNB[,1]),y=log(varTotalZINB[,1]),pch=16,cex=1/4, xlab="NB total var edgeR", ylab="ZINB total var ZINB-edgeR")
+points(x=log(varTotalNB[rowSums(counts==0)>0,1]),y=log(varTotalZINB[rowSums(counts==0)>0,1]),pch=16,cex=1/2,col=cols[rowSums(counts==0)])
+abline(0,1,col=2)
+
+legend("topleft",c("0 zeros","1 zero","2 zeros", "3 zeros"), col=1:4, bty="n", pch=16, cex=1/2)
+
+### compare NB var for genes with zeros
+varTotalNB2 = fitZinb$fitted.values + fitZinb$dispersion+(fitZinb$fitted.values)^2
+zeroGenes = rowSums(counts==0)>0
+plot(x=log(varTotalNB[zeroGenes,1]),y=log(varTotalNB2[zeroGenes,1]),pch=16,cex=1/1.2, xlab="log(NB total var edgeR)", ylab="log(NB total var ZINB-edgeR)",col=cols[rowSums(counts[zeroGenes,]==0)])
+abline(0,1,col=2)
+legend("topleft",c("1 zero","2 zeros", "3 zeros"), col=cols[1:5], bty="n", pch=16, cex=2)
 
 
 

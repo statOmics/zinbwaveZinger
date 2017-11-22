@@ -1,5 +1,4 @@
 source("../zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R")
-source("../method/glmLRTOld.R")
 
 
 #### no zero inflation simulation
