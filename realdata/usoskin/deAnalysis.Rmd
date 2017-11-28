@@ -218,7 +218,8 @@ L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
 L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
 L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
 lrtList=list()
-for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
+#for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
+for(i in 1:ncol(L)) lrtList[[i]] <- glmLRT(fit,contrast=L[,i])
 padjListZinbEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
 deGenesZinbEdgeR
@@ -284,8 +285,46 @@ ggplot(results, aes(fill=method, y=log10(nrGenes), x=1)) + geom_bar(position="do
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) + ylab("log10(number of significant genes)")
 
+```
 
 
+### Check effect of epsilon for ZINB-WaVE edgeR results
+```{r}
+core <- SummarizedExperiment(counts,
+                             colData = data.frame(cellType = cellType, batch=batch))
+eps = c(10^-2, 1, 1e2, 1e4, 1e6, 1e8, 1e10, 1e12, 1e14)
+epsResultsDE = list()
+for(i in 1:length(eps)){
+zinbEps <- zinbFit(core, X = '~ cellType + batch', commondispersion = TRUE, epsilon=eps[i])
+wEps = computeObservationalWeights(zinbEps, counts)
+wEps[wEps<1e-6]=1e-6
+
+  d <- DGEList(counts)
+  d <- suppressWarnings(edgeR::calcNormFactors(d))
+  design <- model.matrix(~cellType+batch)
+  d$weights = wEps
+  d <- estimateDisp(d, design)
+  fit <- glmFit(d,design)
+L <- matrix(0,nrow=ncol(fit$coefficients),ncol=11)
+rownames(L) <- colnames(fit$coefficients)
+colnames(L) <- c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH")
+L[2:11,1] <- -1/10 #NF1 vs. others
+L[2:11,2] <- c(1,rep(-1/10,9)) #NF2 vs. others
+L[2:11,3] <- c(-1/10,1,rep(-1/10,8)) #NF3 vs. others
+L[2:11,4] <- c(rep(-1/10,2),1,rep(-1/10,7)) #NF4 vs. others
+L[2:11,5] <- c(rep(-1/10,3),1,rep(-1/10,6)) #NF5 vs. others
+L[2:11,6] <- c(rep(-1/10,4),1,rep(-1/10,5)) #NP1 vs. others
+L[2:11,7] <- c(rep(-1/10,5),1,rep(-1/10,4)) #NP2 vs. others
+L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
+L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
+L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
+L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
+lrtList=list()
+for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
+padjListZinbEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
+deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
+epsResultsDE[[i]] = deGenesZinbEdgeR
+}
 
 
 ```

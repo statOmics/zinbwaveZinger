@@ -496,6 +496,7 @@ NBsimSingleCell <- function(dataset, group, nTags = 10000, nlibs = length(group)
       allDropoutId <- which(rowSums(dropoutMatrix)==0)
     }
     #add dropouts
+    dropoutMatrix[counts==0 & dropoutMatrix==0]=1 #if count already zero, it's not a dropout
     counts = counts*dropoutMatrix
     object$dropout = dropoutMatrix
 

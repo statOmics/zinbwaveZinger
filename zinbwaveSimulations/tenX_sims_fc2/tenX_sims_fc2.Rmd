@@ -552,9 +552,9 @@ cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 #save(cobraplot,file="cobraPlot10x.rda")
-#png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_allMethods.png", width=7,height=8, units="in", res=300)
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZingeR/plots2/scSimulation_10x_allMethods.png", width=7,height=8, units="in", res=300)
 plot_fdrtprcurve(cobraplot, pointsize=2) + xlab("FDP")
-#dev.off()
+dev.off()
 
 # no genewise zinbwave
 pvalDfCommon = pvalDf[,-grep(x=colnames(pvalDf), pattern="genewise")]
@@ -586,8 +586,9 @@ cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
 colsCobra=colors[match(cobraNames,names(colors))]
 cobraplot <- prepare_data_for_plot(cobraperf, colorscheme=colsCobra)
 save(cobraplot,file="cobraPlot10xNoLimma.rda")
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_10x_cutoff_noLimma.png", width=7,height=8, units="in", res=300)
 plot_fdrtprcurve(cobraplot, pointsize=2, xaxisrange=c(0,0.41), yaxisrange=c(0,0.4)) + xlab("FDP")
-
+dev.off()
 
 
 #orderLegend = c(2, 9, 6, 1, 8, 5, 3, 10, 7, 4)
@@ -622,4 +623,52 @@ hist = lapply(c(1:3, 5:10), function(i){
   hist(res[[i]][,'pval'], main = main, ylim = ylim, xlab = 'pvalues')
 })
 par(mfrow = c(1,1))
+```
+
+## Zero inflation?
+```{r}
+dOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(tenXData)))
+dOrig = estimateDisp(dOrig, design=model.matrix(~cellType))
+fitOrig=glmFit(dOrig,design=model.matrix(~cellType))
+
+plot(x=log(rowMeans(tenXData)), y=rowMeans(tenXData==0), pch=16, cex=1/5, ylab="Fraction of zeros", xlab="log mean count")
+grid=seq(min(rowMeans(tenXData)),max(rowMeans(tenXData)),length.out=5000)
+# poisson
+lines(x=log(grid), y=dpois(0,lambda=grid), col="gold", lwd=3)
+# NB grid
+lines(x=log(grid), y=dnbinom(0,mu=grid, size=1/dOrig$common.dispersion), col="steelblue", lwd=3)
+legend("topright",c("Poisson","NB"), lty=1, col=c("gold","steelblue"), lwd=3)
+
+
+# use the real data to plot the smooth line using smoothers. allows to use gene-specific dispersion and pi.
+
+# NB real data
+zeroProbData = dnbinom(0,mu=fitOrig$fitted.values, size=matrix(1/dOrig$tagwise.dispersion,nrow=nrow(fitOrig),ncol=ncol(fitOrig),byrow=FALSE))
+plot(x=log(rowMeans(tenXData)), y=rowMeans(tenXData==0), pch=16, cex=2/5, ylab="Fraction of zeros", xlab="log mean count")
+#NB
+points(x=log(rowMeans(tenXData)), y=zeroProbData, pch=16, cex=2/5, col="steelblue")
+#ZINB
+coreReal = SummarizedExperiment(as.matrix(tenXData), colData=data.frame(cellType))
+zinbCReal = zinbFit(coreReal, X="~cellType", epsilon=1e12, commondispersion=TRUE)
+wReal=computeObservationalWeights(zinbCReal, tenXData)
+dWOrig=suppressWarnings(edgeR::calcNormFactors(DGEList(tenXData)))
+dWOrig$weights = wReal
+dWOrig = estimateDisp(dWOrig, design=model.matrix(~cellType))
+fit=glmFit(dWOrig,design=model.matrix(~cellType))
+pi = t(getPi(zinbCReal))
+zeroProbDataZINB = rowMeans(pi + (1-pi)*dnbinom(0, mu=fit$fitted.values, size=1/dWOrig$tagwise.dispersion))
+points(x=log(rowMeans(tenXData)), y=zeroProbDataZINB, pch=16, cex=2/5, col="red")
+
+
+
+
+## MA-like plot
+plot(x=1-rowMeans(tenXData==0), y=rowMeans(tenXData==0)-rowMeans(zeroProbData), pch=16, cex=.2, xlab="Observed fraction of positive counts", ylab="Difference between observed and expected fraction of zeros", main="NB") ; abline(h=0,col=2,lwd=2)
+
+
+
+plot(x=zeroProbData[,1], y=(tenXData[,1]==0)-zeroProbData[,1], pch=16, cex=1/3, xlab="Expected NB zero probability", ylab="Difference expected vs. true") ; abline(h=0,col=2,lwd=2)
+
+
+
 ```

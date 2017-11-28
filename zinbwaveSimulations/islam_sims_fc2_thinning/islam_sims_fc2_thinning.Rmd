@@ -1,0 +1,187 @@
+---
+title: "Impact of thinning on performance: does ZINB-WaVE edgeR(DESeq2) converge to bulk edgeR(DESeq2)?"
+author: "Koen Van den Berge"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_height: 7
+    fig_width: 7
+    toc: yes
+    code_folding: hide
+    toc_float: yes
+---
+
+```{r options, echo=FALSE, results="hide",mesasge=FALSE, error=FALSE, include=FALSE, autodep=TRUE}
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
+library(zinbwave)
+library(BiocParallel)
+library(doParallel)
+library(Biobase)
+library(scales)
+library(iCOBRA) # roc
+library(genefilter) #filtered pvalues
+library(RColorBrewer)
+library(ggplot2)
+#library(wesanderson)
+#library(wesanderson)
+pathToParentFolder="~/Dropbox/phdKoen/singleCell/zinbwavezingerGitHub/zinbwaveZinger/"
+source(paste0(pathToParentFolder,"zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R"))
+```
+
+```{r}
+NCORES <- 2
+registerDoParallel(NCORES)
+register(DoparParam())
+```
+
+We want to evaluate the impact of the ridge penalty on the performance (TPR and FDP) using the updated simulation framework from Koen. For the updated simulation framework, I used the code in zinbwaveSimulations/islam_sims_fc2/islam_sims_fc2_newSimulations.Rmd and the functions in zingeRsimulations/simulationHelpFunctions_v7_diffInZero.R
+
+
+
+```{r data}
+data(islamEset, package = "zingeR")
+islamHlp=exprs(islamEset)[-c(1:8),] #first 8 are spike-ins.
+cellType=pData(islamEset)[,"cellType"]
+paramsIslam = getDatasetMoMPositive(counts = islamHlp)
+```
+
+```{r sims}
+nSamples=80
+grp=as.factor(rep(0:1, each = nSamples/2)) #two-group comparison
+nTags=10000 #nr of features
+set.seed(11)
+DEind = sample(1:nTags,floor(nTags*.1),replace=FALSE) #10% DE
+fcSim=(2 + rexp(length(DEind), rate = 1/2)) #fold changes
+libSizes=sample(colSums(islamHlp),nSamples,replace=TRUE) #library sizes
+simDataIslam <- NBsimSingleCell(foldDiff = fcSim, ind = DEind,
+                                dataset = islamHlp, nTags = nTags,
+                                group = grp,
+                                verbose = TRUE, params = paramsIslam,
+                                lib.size = libSizes, cpm="AveLogCPM")
+simDataIslam$counts[1:5,1:5]
+```
+
+# Methods
+
+### edgeR
+```{r}
+edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(edgeR)
+  d <- DGEList(counts)
+  d <- suppressWarnings(edgeR::calcNormFactors(d))
+  design <- model.matrix(~group)
+  d <- estimateDisp(d, design)
+  plotBCV(d, ylim = ylim, main = 'edgeR', xlim = xlim)
+  fit <- glmFit(d,design)
+  lrt <- glmLRT(fit, coef = 2)
+  pval <- lrt$table$PValue
+  padj <- p.adjust(pval, "BH")
+  cbind(pval = pval, padj = padj)
+}
+```
+
+### DESeq2
+```{r}
+DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
+  require(DESeq2)
+  colData <- data.frame(group = group)
+  dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  colData(dse)$group <- as.factor(colData(dse)$group)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse, minmu=1e-3)
+  dse = nbinomWaldTest(dse, minmu=1e-3)
+  rr <- results(dse)
+  cbind(pval = rr$pvalue, padj = rr$padj)
+}
+```
+
+```{r}
+zinbwave_edgeR <- function(counts, group, zinb){
+  require(edgeR) ; require(zinbwave)
+  d=DGEList(counts)
+  d=suppressWarnings(calcNormFactors(d))
+  design=model.matrix(~group)
+  weights <- computeObservationalWeights(zinb, d$counts)
+  d$weights <- weights
+  d=estimateDisp(d, design)
+  plotBCV(d)
+  fit=glmFit(d,design)
+  lrt=glmWeightedF(fit,coef=2, independentFiltering = TRUE)
+  cbind(pval = lrt$table$PValue, padj = lrt$table$padjFilter,
+        logFC = lrt$table$logFC)
+}
+```
+
+```{r}
+zinbwave_DESeq2 <- function(counts, group, zinb){
+    require(DESeq2) ; require(zinbwave)
+  colData=data.frame(group=group)
+  design=model.matrix(~group)
+  dse=DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
+  weights <- computeObservationalWeights(zinb, counts)
+  #weights[weights<1e-6]=1e-6 #temporary fix.
+  assays(dse)[["weights"]]=weights
+  dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse = estimateDispersions(dse, minmu=1e-3)
+  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu=1e-3)
+  res = results(dse)
+  cbind(pval = res$pvalue, padj = res$padj, logFC = res$log2FoldChange)
+}
+```
+
+
+```{r core}
+core <- SummarizedExperiment(simDataIslam$counts,
+                             colData = data.frame(grp = grp))
+```
+
+```{r thinningResults}
+thinningVec = c(2,4,8,20,50)
+xlim=c(0,15);ylim=c(0,10)
+resEdgeR=list()
+resZinbEdgeR=list()
+resDESeq2=list()
+resZinbDESeq2=list()
+for(i in 1:length(thinningVec)){
+  print(i)
+  countsThinned = round(simDataIslam$counts/thinningVec[i])
+  coreThin <- SummarizedExperiment(countsThinned,
+                               colData = data.frame(grp = grp))
+  zinbCThin = zinbFit(core, X = '~ grp', commondispersion = TRUE, epsilon = 1e12)
+  resEdgeR[[i]] = edgeR(countsThinned, grp)
+  resDESeq2[[i]] = DESeq2(countsThinned, grp)
+  resZinbEdgeR[[i]] = zinbwave_edgeR(countsThinned, grp, zinbCThin)
+  resZinbDESeq2[[i]] = zinbwave_DESeq2(countsThinned, grp, zinbCThin)
+}
+names(resEdgeR) = names(resDESeq2) = names(resZinbDESeq2) =names(resZinbEdgeR) = paste0("thin",thinningVec)
+```
+
+# Results
+
+
+## TPR vs FDR
+```{r plot}
+trueDE = rep(0, nTags)
+trueDE[simDataIslam$indDE] = 1
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(resEdgeR, function(x) x[,"pval"]))),
+               padj = as.data.frame(do.call(cbind, lapply(resEdgeR, function(x) x[,"padj"]))),
+               truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplot <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5) + xlab("FDP")
+
+
+pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 1))),
+               padj = as.data.frame(do.call(cbind, lapply(resDESeq, '[[', 2))),
+               truth = data.frame(status = trueDE))
+cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
+cobraplotDESeq <- prepare_data_for_plot(cobraperf)
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = 1,linewidth = .5) + xlab("FDP")
+```
+
+```{r}
+plot_fdrtprcurve(cobraplot, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5) + xlab("FDP")
+
+plot_fdrtprcurve(cobraplotDESeq, plottype = c("curve", "points"), pointsize = .1, xaxisrange = c(0, 0.2),linewidth = .5) + xlab("FDP")
+
+```
