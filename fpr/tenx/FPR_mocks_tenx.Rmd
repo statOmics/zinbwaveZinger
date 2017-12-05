@@ -60,7 +60,8 @@ runDESeq2_poscounts <- function(e) {
                                 design=~ condition)
   dds <- estimateSizeFactors(dds,type="poscounts")
   dds <- estimateDispersions(dds, minmu = 1e-3)
-  dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard", minmu = 1e-3)
+  #dds <- nbinomWaldTest(dds, betaPrior=TRUE, modelMatrixType="standard", minmu = 1e-3)
+  dds <- nbinomLRT(dds, minmu=1e-3, reduced=~1)
   res <- results(dds, name="condition_B_vs_A")
   pvals <- res$pvalue
   padj <- res$padj
@@ -105,8 +106,9 @@ runZinbwaveDESeq2 <- function(e){
   dimnames(weights) = NULL
   assays(dse)[["weights"]] = weights
   dse <- estimateDispersions(dse, minmu = 1e-3)
-  dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu = 1e-3)
-  res = results(dse, name="conditionB")
+  #dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu = 1e-3)
+  dse <- nbinomLRT(dse, minmu=1e-3, reduced=~1)
+  res = results(dse, name="condition_B_vs_A")
   list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
 }
 ```

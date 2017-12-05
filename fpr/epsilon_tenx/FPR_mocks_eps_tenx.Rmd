@@ -134,7 +134,7 @@ We are expecting uniform distribution for the p-values as the 2 groups contain c
 ```{r fdrEps10xPval}
 par(mfrow = c(3,3))
 hh = lapply(1:length(epsVec), function(i){
-  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000),cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5)
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000),cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5, breaks = 20)
 })
 par(mfrow = c(1,1))
 ```
@@ -152,7 +152,7 @@ mtext("a" ,at=-2, padj = -1,font=2, cex=4/3)
 
 # hist pvalues
 hh = lapply(1:length(epsVec), function(i){
-  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,2000),cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5, xlab = 'p-values')
+  hist(pvalsList[[i]], main = paste0('epsilon=', epsVec[i]), ylim=c(0,800),cex.lab = 1.5,cex.axis= 1.5,cex.main=1.5, xlab = 'p-values',breaks = 20)
   if (i==1) mtext("b" ,at=-1,padj = -1, font=2, cex=4/3)
 })
 ```

@@ -110,7 +110,7 @@ tsneSeurat <- p4 + labs(color='Clustering with PCA') +
 ```
 
 ## Figure
-```{r tenxcase,fig.height=3,fig.width=10}
+```{r tenxcase,fig.height=3,fig.width=12}
 size=8
 library(cowplot)
 plot_grid(tsneSeurat,

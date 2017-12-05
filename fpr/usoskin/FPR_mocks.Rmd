@@ -15,7 +15,7 @@ toc_float: yes
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(edgeR)
 library(limma)
-library(DESeq2)
+#library(DESeq2)
 library(zinbwave)
 library(BiocParallel)
 library(doParallel)
@@ -332,6 +332,78 @@ res <- lapply(1:nreps, function(i) {
 res <- lapply(1:nreps, function(i) {
   load(sprintf('FPR_%s.rda', i))
   resFPR
+})
+```
+
+## Add zingeR for supplementary figure
+
+```{r}
+library(zingeR)
+library(DESeq2)
+runZingerDESeq2 <- function(e){
+  #load_all('../../../DESeq2/')
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)), design=~ condition + pickingSession)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
+  designZI=model.matrix(~effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE, design=model.matrix(~condition + pickingSession), colData=colData(dse), normalization="DESeq2_pos", designZI=designZI)
+  assays(dse)[["weights"]] = zeroWeights
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(zeroWeights)-2)
+  res <- results(dse, name="conditionB")
+  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
+}
+
+runZingerEdgeR <- function(e){
+  library(edgeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  #not adding a design matrix models the zeroes with the library size automatically
+  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
+  pickingSession = pData(e)[,"Picking sessions"]
+  designZI = model.matrix(~ effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
+  d$weights = zeroWeights
+  d=estimateDisp(d,design)
+  fit <- glmFit(d, design)
+  lrt = zinbwave::glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
+}
+```
+
+```{r res}
+algos <- list("DESeq2-zinger" = runZingerDESeq2,
+              "edgeR-zinger"  = runZingerEdgeR)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+nreps <- 30
+```
+
+```{r,eval=FALSE}
+res <- lapply(16:nreps, function(i) {
+  cat(i," ")
+  eLoop <- eset[,as.numeric(subsets[i,])]
+  # We remove genes with only zeros as zinbwave needs to remove these genes
+  cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), 
+      " genes with only 0's")
+  eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+  condition=factor(rep(c("A","B"),each=45))
+  pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+  pData(eLoop)$condition=condition
+  pData(eLoop)$pickingSession=pickingSession
+  resFPR <- lapply(namesAlgos, function(n){
+    print(n)
+    algos[[n]](eLoop)
+  })
+  save(resFPR, file = sprintf('FPR_%s_zinger.rda', i))
+  rm(resFPR)
+  i
 })
 ```
 
