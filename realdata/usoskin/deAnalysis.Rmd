@@ -285,6 +285,34 @@ ggplot(results, aes(fill=method, y=log10(nrGenes), x=1)) + geom_bar(position="do
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) + ylab("log10(number of significant genes)")
 
+
+
+### including zingeR
+resultsZingeR = data.frame(
+  nrGenes = c(46 , 106 , 3 , 37 , 105 , 415 , 2 , 3 , 54 , 1 , 381, #scde
+            396 , 272 , 529 , 394 , 409 , 1355 , 590 , 241 , 424 , 370 , 1425, #MAST
+            6944 , 5128 , 5154 , 801 , 4021 , 2422 , 6724 , 202 , 9388 , 153 , 5735, #limma
+            640 , 711 , 186 , 289 , 589 , 1356 , 530 , 316 , 1691 , 75 , 1652, #DESeq2
+            522 , 1011 , 348 , 419 , 1216 , 1915 , 762 , 376 , 2203 , 142 , 3087, #ZINB deseq2
+            670, 981, 314, 429, 1042, 1692, 671, 510 , 1555, 136, 2024, #zingeR DESeq2
+            860 , 1375 , 401 , 654 , 1149 , 1942 , 933 , 380 , 1909 , 403 , 2458, #egdeR
+            495 , 772 , 241 , 508 , 959 , 1802 , 967 , 464 , 2376 , 193 , 2919, #zinb edgeR
+            1004 , 1638 , 539 , 895 , 1601 , 2486 , 1231 , 679 , 1936 , 508 , 3667), #zingeR edger
+    contrast=rep(c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH"),9),
+    method=rep(c("SCDE","MAST","limma-voom","DESeq2","ZINB-WaVE_DESeq2","zingeR_DESeq2", "edgeR","ZINB-WaVE_edgeR","zingeR_edgeR"),each=11))
+resultsZingeR$method=factor(resultsZingeR$method,levels=c("SCDE","MAST","DESeq2","ZINB-WaVE_DESeq2","zingeR_DESeq2","edgeR","ZINB-WaVE_edgeR","zingeR_edgeR","limma-voom"))
+
+
+# facets
+ggplot(resultsZingeR, aes(fill=method, y=log10(nrGenes), x=1)) + geom_bar(position="dodge", stat="identity") + facet_wrap(~contrast) +  scale_fill_manual(values = c("grey","darkturquoise","brown","darkseagreen","darkolivegreen4","red","salmon","hotpink1","blue") ) + theme_bw() + theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) + ylab("log10(number of significant genes)")
+
+
+
+
+
+
 ```
 
 

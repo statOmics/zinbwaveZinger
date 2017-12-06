@@ -289,6 +289,46 @@ DEsingle <- function(counts, group, xlim=NULL, ylim=NULL){
 }
 ```
 
+### zingeR-edgeR
+```{r zingeREdgeR}
+zingeR_edgeR <- function(counts, group, ylim = NULL, xlim = NULL){
+  #require(zingeR)
+  d <- DGEList(counts)
+  d <- suppressWarnings(edgeR::calcNormFactors(d))
+  design <- model.matrix(~ group)
+  weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 300,
+                           normalization = "TMM", verbose = F)
+  d$weights <- weights
+  d <- estimateDisp(d, design)
+  plotBCV(d, ylim = ylim, main = 'zingeR', xlim = xlim)
+  fit <- glmFit(d,design)
+  lrt <- zinbwave::glmWeightedF(fit, coef = 2, independentFiltering = TRUE)
+  cbind(pval = lrt$table$PValue, padj =lrt$table$padjFilter)
+}
+```
+
+### zingeR-DESeq2
+```{r zingeR-deseq2}
+zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
+  #require(zingeR)
+  colData <- data.frame(group = group)
+  design <- model.matrix(~ group)
+  dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData,
+                                design = ~group)
+  weights <- zingeR::zeroWeightsLS(counts = counts, design = design, maxit = 300,
+                           normalization = "DESeq2_poscounts", colData = colData,
+                           designFormula = ~group, verbose = F)
+  assays(dse)[["weights"]] <- weights
+  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior = TRUE, useT = TRUE,
+                        df = rowSums(weights) - 2)
+  rr <- results(dse)
+  cbind(pval = rr$pvalue, padj = rr$padj)
+}
+```
+
+
 ## zinbwave
 
 We compute the same weights as zingeR (i.e. posterior probabilities that a count belongs to the count component given that the count and library size is observed), but using the ZINB-WaVE estimation procedure. See more details here (http://www.biorxiv.org/content/early/2017/04/06/125112).
@@ -395,6 +435,9 @@ res[['ZINB-WaVE_DESeq2_genewise']] = zinbwave_DESeq2(counts, grp, zinb_g)
 res[['ZINB-WaVE_edgeR_genewise']]  = zinbwave_edgeR(counts, grp, zinb_g, ylim=ylim, main = 'ZINB-WaVE, genewise dispersion', xlim = xlim)
 res[['ZINB-WaVE_limmavoom_genewise']]  = zinbwave_limma(counts, grp, zinb_g)
 par(mfrow = c(1,1))
+res[["zingeR_edgeR"]] = zingeR_edgeR(counts=simDataIslam$counts, group=grp)
+res[["zingeR_DESeq2"]] = zingeR_DESeq2(counts=simDataIslam$counts, group=grp)
+
 ```
 
 ```{r res}
@@ -477,7 +520,7 @@ pp = COBRAData(pval = as.data.frame(do.call(cbind, lapply(res, '[[', 1))),
                padj = as.data.frame(do.call(cbind, lapply(res, '[[', 2))),
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue", "zingeR_edgeR"="hotpink1", zingeR_DESeq2="darkolivegreen4")
 #iCOBRA converts '-' to '.'. Redo this.
 cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")
@@ -495,7 +538,7 @@ pp = COBRAData(pval = pvalDfCommon,
                padj = padjDfCommon,
                 truth = data.frame(status = trueDE))
 cobraperf <- calculate_performance(pp, binary_truth = "status", thrs = 0.05)
-colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue")
+colors=c(limmavoom="blue", "ZINB-WaVE_limmavoom_common"="steelblue", "ZINB-WaVE_limmavoom_genewise"="darkslategray3", edgeR="red", "ZINB-WaVE_edgeR_common"="salmon", "ZINB-WaVE_edgeR_genewise"="deeppink2",  DESeq2="brown",  "ZINB-WaVE_DESeq2_common"="darkseagreen", "ZINB-WaVE_DESeq2_genewise"="darkkhaki",  MAST="darkturquoise", metagenomeSeq="forestgreen", scde="grey", NODES="black",  Seurat="dodgerblue", "zingeR_edgeR"="hotpink1", zingeR_DESeq2="darkolivegreen4")
 #iCOBRA converts '-' to '.'. Redo this.
 cobraNames = sort(names(cobraperf@overlap)[1:(ncol(cobraperf@overlap)-1)])
 cobraNames = gsub(x=cobraNames, pattern=".", fixed=TRUE, replacement="-")

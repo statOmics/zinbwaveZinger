@@ -23,6 +23,7 @@ png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/scSimulation_composite.p
 p
 dev.off()
 
+
 ## islam and Trapnell without limma-voom
 load("./islam_sims_fc2/cobraplotIslamNoLimma.rda")
 islamPlot=plot_fdrtprcurve(cobraplot, pointsize=2, xaxisrange=c(0,0.5), yaxisrange=c(0,0.7))
