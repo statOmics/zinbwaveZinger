@@ -1,6 +1,8 @@
-# Data analysis and simulations for the ZINB-WaVE / zingeR paper
+# Data analysis for the ZINB-WaVE / zingeR paper
 
-This repository is designed to allow interested people to reproduce the results and figures of our paper called 'Unlocking RNA-seq tools for zero inflation and single-cell applications using observation weights'. For any questions or issues with the code on this repository, please use the "Issues" tab.
+This repository is designed to allow interested people to reproduce the results and figures of our paper called 'Unlocking RNA-seq tools for zero inflation and single-cell applications using observation weights'.   
+
+For any questions or issues with the code on this repository, please use the "Issues" tab.
 
 ## Dependencies
 
@@ -43,6 +45,10 @@ To be able to run the code in this repo, it is required to have `R` (>=3.4) and 
 
 
 ## Getting started
+
+### Time benchmarking
+
+For each of the real datasets Islam, Usoskin, 10X genomics, respectively run [benchmark_islam.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/timebenchmark/islam/benchmark_islam.Rmd), [benchmark_usoskin.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/timebenchmark/usoskin/benchmark_usoskin.Rmd), [benchmark_tenx.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/timebenchmark/tenx/benchmark_tenx.Rmd). Finally, run [benchmark_all.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/timebenchmark/benchmark_all.Rmd).
 
 ### Real data
 
