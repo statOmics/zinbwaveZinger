@@ -15,7 +15,7 @@ toc_float: yes
 knitr::opts_chunk$set(fig.align="center", cache=TRUE, error=FALSE, message=FALSE, warning=TRUE)
 library(edgeR)
 library(limma)
-#library(DESeq2)
+library(DESeq2)
 library(zinbwave)
 library(BiocParallel)
 library(doParallel)
@@ -335,77 +335,6 @@ res <- lapply(1:nreps, function(i) {
 })
 ```
 
-## Add zingeR for supplementary figure
-
-```{r}
-library(zingeR)
-library(DESeq2)
-runZingerDESeq2 <- function(e){
-  #load_all('../../../DESeq2/')
-  condition = pData(e)$condition
-  pickingSession = pData(e)$pickingSession
-  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)), design=~ condition + pickingSession)
-  dse <- estimateSizeFactors(dse, type="poscounts")
-  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
-  designZI=model.matrix(~effLogLibSize + pickingSession)
-  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE, design=model.matrix(~condition + pickingSession), colData=colData(dse), normalization="DESeq2_pos", designZI=designZI)
-  assays(dse)[["weights"]] = zeroWeights
-  dse <- estimateDispersions(dse)
-  dse <- nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(zeroWeights)-2)
-  res <- results(dse, name="conditionB")
-  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
-}
-
-runZingerEdgeR <- function(e){
-  library(edgeR)
-  condition = pData(e)$condition
-  pickingSession = pData(e)$pickingSession
-  design <- model.matrix(~ condition + pickingSession)
-  d <- DGEList(exprs(e))
-  d <- edgeR::calcNormFactors(d)
-  #not adding a design matrix models the zeroes with the library size automatically
-  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
-  pickingSession = pData(e)[,"Picking sessions"]
-  designZI = model.matrix(~ effLogLibSize + pickingSession)
-  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
-  d$weights = zeroWeights
-  d=estimateDisp(d,design)
-  fit <- glmFit(d, design)
-  lrt = zinbwave::glmWeightedF(fit, coef=2, independentFiltering = TRUE)
-  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
-       logfc = lrt$table$logFC)
-}
-```
-
-```{r res}
-algos <- list("DESeq2-zinger" = runZingerDESeq2,
-              "edgeR-zinger"  = runZingerEdgeR)
-namesAlgos <- names(algos)
-names(namesAlgos) <- namesAlgos
-nreps <- 30
-```
-
-```{r,eval=FALSE}
-res <- lapply(16:nreps, function(i) {
-  cat(i," ")
-  eLoop <- eset[,as.numeric(subsets[i,])]
-  # We remove genes with only zeros as zinbwave needs to remove these genes
-  cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), 
-      " genes with only 0's")
-  eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
-  condition=factor(rep(c("A","B"),each=45))
-  pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
-  pData(eLoop)$condition=condition
-  pData(eLoop)$pickingSession=pickingSession
-  resFPR <- lapply(namesAlgos, function(n){
-    print(n)
-    algos[[n]](eLoop)
-  })
-  save(resFPR, file = sprintf('FPR_%s_zinger.rda', i))
-  rm(resFPR)
-  i
-})
-```
 
 ## Boxplots
 
@@ -456,8 +385,8 @@ hh <- sapply(1:length(res[[1]]), function(i){
 })
 par(mfrow=c(1,1))
 ```
-## Plot paper
 
+## Plot paper
 ```{r fprUsoskin,fig.width=10,fig.height=7}
 par(mar = c(4.1, 4.25, 3.1, 1), bty = "l")
 layout(rbind(cbind(matrix(1,3,3), matrix(2,3,3)),
@@ -539,6 +468,190 @@ hh <- sapply(1:length(res[[1]]), function(i){
        cex.axis =  1.5, cex.main = 1.2, col = alpha(col, .8),
        breaks = seq(0, 1, by = 0.05)) 
   if (i==2) mtext("d" ,at=-0.8, padj = -2, font=2, cex=4/3)
+})
+```
+
+## Supplementary figure
+
+### Results
+
+```{r}
+library(zingeR)
+library(DESeq2)
+runZingerDESeq2 <- function(e){
+  #load_all('../../../DESeq2/')
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  dse <- DESeqDataSetFromMatrix(exprs(e), colData=DataFrame(pData(e)), design=~ condition + pickingSession)
+  dse <- estimateSizeFactors(dse, type="poscounts")
+  effLogLibSize <- log(colSums(counts(dse))*(1/sizeFactors(dse)))
+  designZI=model.matrix(~effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(counts(dse), verbose=FALSE, design=model.matrix(~condition + pickingSession), colData=colData(dse), normalization="DESeq2_pos", designZI=designZI)
+  assays(dse)[["weights"]] = zeroWeights
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(zeroWeights)-2)
+  res <- results(dse, name="conditionB")
+  list(pvals = res$pvalue, padj = res$padj, logfc = res$log2FoldChange)
+}
+
+runZingerEdgeR <- function(e){
+  library(edgeR)
+  condition = pData(e)$condition
+  pickingSession = pData(e)$pickingSession
+  design <- model.matrix(~ condition + pickingSession)
+  d <- DGEList(exprs(e))
+  d <- edgeR::calcNormFactors(d)
+  #not adding a design matrix models the zeroes with the library size automatically
+  effLogLibSize = log(d$samples$lib.size*d$samples$norm.factors)
+  pickingSession = pData(e)[,"Picking sessions"]
+  designZI = model.matrix(~ effLogLibSize + pickingSession)
+  zeroWeights = zeroWeightsLS(d$counts, design, verbose = FALSE)
+  d$weights = zeroWeights
+  d=estimateDisp(d,design)
+  fit <- glmFit(d, design)
+  lrt = zinbwave::glmWeightedF(fit, coef=2, independentFiltering = TRUE)
+  list(pvals = lrt$table$PValue, padj = lrt$table$padjFilter,
+       logfc = lrt$table$logFC)
+}
+```
+
+```{r}
+algos <- list("DESeq2-zinger" = runZingerDESeq2,
+              "edgeR-zinger"  = runZingerEdgeR)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+nreps <- 30
+```
+
+```{r,eval=FALSE}
+res <- lapply(1:nreps, function(i) {
+  cat(i," ")
+  eLoop <- eset[,as.numeric(subsets[i,])]
+  # We remove genes with only zeros as zinbwave needs to remove these genes
+  cat('Removing ', sum(rowSums(exprs(eLoop)) == 0), 
+      " genes with only 0's")
+  eLoop <- eLoop[rowSums(exprs(eLoop)) != 0, ]
+  condition=factor(rep(c("A","B"),each=45))
+  pickingSession=factor(rep(rep(c("Cold","rt1","rt2"),each=15),2))
+  pData(eLoop)$condition=condition
+  pData(eLoop)$pickingSession=pickingSession
+  resFPR <- lapply(namesAlgos, function(n){
+    print(n)
+    algos[[n]](eLoop)
+  })
+  save(resFPR, file = sprintf('FPR_%s_zinger.rda', i))
+  rm(resFPR)
+  i
+})
+```
+
+### Plot
+```{r}
+algos <- list("DESeq2"          = runDESeq2_poscounts,
+              "DESeq2-zinbwave" = runZinbwaveDESeq2,
+              "edgeR"           = runEdgeR,
+              "edgeR-zinbwave"  = runZinbwaveEdgeR,
+              "limma-voom"      = runVoom,
+              "MAST"            = runMAST,
+              "SCDE"            = runSCDE,
+              "DESeq2-zingeR"   = runZingerDESeq2,
+              "edgeR-zingeR"    = runZingerEdgeR)
+namesAlgos <- names(algos)
+names(namesAlgos) <- namesAlgos
+
+res <- lapply(1:nreps, function(i) {
+  load(sprintf('FPR_%s.rda', i))
+  res = resFPR
+  load(sprintf('FPR_%s_zinger.rda', i))
+  c(res, resFPR)
+})
+
+hlp=lapply(res,function(replication){
+  lapply(replication,function(method){
+    pval=method$pvals
+    pval[is.na(pval)]=1 #independent filtering
+    mean(pval<=0.05)
+  })
+})
+
+fprHat=Reduce(hlp,f=cbind)
+fprHat=matrix(unlist(fprHat),nrow=length(algos),ncol=nreps,byrow=FALSE)
+rownames(fprHat)=namesAlgos
+
+boxplotData=data.frame(fpr=c(t(fprHat)),method=rep(namesAlgos,each=nreps))
+boxplotData$method = as.vector(boxplotData$method)
+ourcol = rep(1, length(unique(boxplotData$method)))
+ourcol[c(4, 5, 7, 8)] = 4 #our methods in blue
+```
+
+```{r fprUsoskinSupp,fig.width=10,fig.height=5}
+library(gridBase)
+library(grid)
+par(mar = c(4.1, 4.25, 4.1, 1), bty = "l")
+layout(cbind(matrix(1,3,3), matrix(2:10,3,3,byrow = TRUE)))
+plot.new()              ## suggested by @Josh
+vps <- baseViewports()
+pushViewport(vps$figure) ##   I am in the space of the autocorrelation plot
+vp1 <-plotViewport(c(1, 1, 1, 1)) ## create new vp with margins, you play with this values 
+h <- ggplot(boxplotData,
+       aes(x=reorder(method,fpr,median),y=fpr)) +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
+  theme_bw() +
+  geom_point(position = position_jitter(w = 0.1, h = 0),
+             color="grey50", size=1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
+  scale_colour_discrete(guide="none")  + ylab("PCER") +
+  geom_hline(aes(yintercept=0.05,colour="red")) +
+  theme(text = element_text(size=20))
+print(h,vp = vp1)  
+mtext("a" ,at=-0.15, padj = -2, font=2, cex=4/3)
+
+hh <- sapply(1:length(res[[1]]), function(i){
+  col = 'white'
+  if (i %in% c(2,4,8,9)) col = 'blue'
+  nn = names(algos)[i]
+  if (nn =='DESeq2_poscounts') nn = 'DESeq2'
+  hist(res[[1]][[i]]$pvals, main = nn,
+       xlab = "p-values", cex.lab = 1.5, 
+       cex.axis =  1.5, cex.main = 1.2, col = alpha(col, .8),
+       breaks = seq(0, 1, by = 0.05)) 
+  if (i==1) mtext("b" ,at=-0.8, padj = -2, font=2, cex=4/3)
+})
+
+```
+
+```{r fprUsoskinSuppNoZinger,fig.width=10,fig.height=5}
+library(gridBase)
+library(grid)
+par(mar = c(4.1, 4.25, 4.1, 1), bty = "l")
+layout(cbind(matrix(1,3,3), matrix(2:10,3,3,byrow = TRUE)))
+plot.new()              ## suggested by @Josh
+vps <- baseViewports()
+pushViewport(vps$figure) ##   I am in the space of the autocorrelation plot
+vp1 <-plotViewport(c(1, 1, 1, 1)) ## create new vp with margins, you play with this values 
+boxplotData = boxplotData[!grepl('zingeR', boxplotData$method), ]
+ourcol = c(1,1,1,4,1,4,1)
+h <- ggplot(boxplotData,
+       aes(x=reorder(method,fpr,median),y=fpr)) +
+  geom_boxplot(outlier.colour=rgb(0,0,0,0), col = ourcol) +
+  theme_bw() +
+  geom_point(position = position_jitter(w = 0.1, h = 0),
+             color="grey50", size=1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("") +
+  scale_colour_discrete(guide="none")  + ylab("PCER") +
+  geom_hline(aes(yintercept=0.05,colour="red")) +
+  theme(text = element_text(size=20))
+print(h,vp = vp1)  
+
+hh <- sapply(1:7, function(i){
+  col = 'white'
+  if (i %in% c(2,4)) col = 'blue'
+  nn = names(algos)[i]
+  if (nn =='DESeq2_poscounts') nn = 'DESeq2'
+  hist(res[[1]][[i]]$pvals, main = nn,
+       xlab = "p-values", cex.lab = 1.5, 
+       cex.axis =  1.5, cex.main = 1.2, col = alpha(col, .8),
+       breaks = seq(0, 1, by = 0.05)) 
 })
 ```
 

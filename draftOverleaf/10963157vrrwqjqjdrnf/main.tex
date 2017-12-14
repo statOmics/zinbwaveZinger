@@ -73,9 +73,26 @@
 \usepackage[]{algorithm2e}
 \usepackage{amsmath}
 \usepackage{amsfonts} %%% added by Fanny to get mathsbb 
+\usepackage{ulem}
+\usepackage{natbib} % to get citep and citet
 
+\usepackage[]{color}
+\usepackage{lmodern}
+\definecolor{gray}{rgb}{0.5, 0.5, 0.5}
+\newcommand{\RPack}[1]{\textsf{#1}}
+\newcommand{\RClass}[1]{\textit{#1}}
+\newcommand{\RCmd}[1]{\texttt{#1}}
+\newcommand{\RObj}[1]{\texttt{#1}}
+\newcommand{\soft}[1]{\texttt{#1}}
 %%%% remove this line when submitting
 \newcommand{\fanny}[1]{\textcolor{blue}{*** FP: #1}}
+\newcommand{\koen}[1]{\textcolor{olive}{*** KVdB: #1}}
+\newcommand{\sd}[1]{\textcolor{red}{*** SD: #1}}
+\definecolor{ao}{rgb}{0.0, 0.5, 0.0}
+\newcommand{\lc}[1]{\textcolor{ao}{*** LC: #1}}
+\newcommand{\davide}[1]{\textcolor{red}{*** DR: #1}}
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                             %%
@@ -122,7 +139,7 @@
 %%                                          %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\title{Unlocking RNA-seq tools for zero-inflation and single cell applications using observation weights}
+\title{Unlocking RNA-seq tools for zero inflation and single-cell applications using observation weights}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                          %%
@@ -149,11 +166,10 @@
        noteref={n1},
     email={fperraudeau@berkeley.edu}
 ]{\inits{FP} \fnm{Fanny} \snm{Perraudeau}}
-
 \author[
     addressref={aff4,aff5},
     email={charlotte.soneson@uzh.ch}
-]{\inits{CS} \fnm{[TBD POSITIONS] Charlotte} \snm{Soneson}}
+]{\inits{CS} \fnm{Charlotte} \snm{Soneson}}
 \author[
     addressref={aff6},
     email={milove@email.unc.edu}
@@ -173,8 +189,7 @@
 \author[
     addressref={aff3, aff12},
     email={sandrine@stat.berkeley.edu}
-]{\inits{SD} \fnm{Sandrine} \snm{Dudoit [TBD POSITIONS]}}
-
+]{\inits{SD} \fnm{Sandrine} \snm{Dudoit}}
 \author[
    addressref={aff1,aff2},
    corref={aff1},  
@@ -206,7 +221,7 @@
   \cny{Belgium}
 }
 \address[id=aff3]{
-    \orgname{Division of Biostatistics, School of Public Health, University of California},
+    \orgname{Division of Biostatistics, School of Public Health, University of California, Berkeley},
     \city{Berkeley},
     \cny{USA}
 }
@@ -224,8 +239,8 @@
     \cny{Switzerland}
 }
 \address[id=aff6]{
-    \orgname{Department of Biostatistics, University of North Carolina, Chapel Hill},
-    \city{NC},
+    \orgname{Department of Biostatistics and Genetics, The University of North Carolina at Chapel Hill},
+    \city{Chapel Hill, NC},
     \cny{USA}
 }
 \address[id=aff7]{
@@ -254,7 +269,7 @@
     \cny{France}
 }
 \address[id=aff12]{
-    \orgname{Department of Statistics, University of California},
+    \orgname{Department of Statistics, University of California, Berkeley},
     \city{Berkeley},
     \cny{USA}
 }
@@ -291,10 +306,7 @@
 \begin{abstract} % abstract
 %\parttitle{Background} 
 %% ABSTRACT CAN ONLY BE 100 WORDS. CURRENTLY 91.
-Dropout in single cell RNA-seq (scRNA-seq) applications causes many transcripts to go undetected. 
-It induces excess zero counts, which leads to power issues in differential expression (DE) analysis and has triggered the development of bespoke scRNA-seq DE tools that cope with zero-inflation.
-Recent evaluations, however, have shown that dedicated scRNA-seq tools provide no advantage compared to traditional bulk RNA-seq tools.
-We introduce zingeR, a zero-inflated negative binomial model that identifies excess zero counts and generates observation weights to unlock bulk RNA-seq pipelines for zero-inflation, boosting performance in scRNA-seq differential expression analysis.
+Dropout events in single-cell transcriptome sequencing (scRNA-seq) cause many transcripts to go undetected and induce an excess of zero read counts, leading to power issues in differential expression (DE) analysis. This has triggered the development of bespoke scRNA-seq DE methods to cope with zero inflation. Recent evaluations, however, have shown that dedicated scRNA-seq tools provide no advantage compared to traditional bulk RNA-seq tools. We introduce a weighting strategy, based on a zero-inflated negative binomial (ZINB) model, that identifies excess zero counts and generates gene and cell-specific weights to unlock bulk RNA-seq DE pipelines for zero-inflated data, boosting performance for scRNA-seq.
 \end{abstract}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -306,9 +318,10 @@ We introduce zingeR, a zero-inflated negative binomial model that identifies exc
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{keyword}
-\kwd{single cell RNA-sequencing}
+\kwd{single-cell RNA sequencing}
 \kwd{differential expression}
 \kwd{zero-inflated negative binomial}
+\kwd{weights}
 \end{keyword}
 
 % MSC classifications codes, if any
@@ -353,48 +366,24 @@ We introduce zingeR, a zero-inflated negative binomial model that identifies exc
 
 
 \section*{Background}
-
-\fanny{More clearly define the use case: assessing differential expression between cell types or homogeneous groups of cells.}\\
 %introduction, rna-seq
-Transcriptomics has become one of the standard tools in modern biology to unravel the molecular basis of biological processes and diseases. One of the most common applications of transcriptome profiling is the discovery of differentially expressed (DE) genes, which exhibit changes in average expression levels across conditions \cite{Love2014, Robinson2010a, Law2014}. Over the last decade, RNA-seq has become the standard technology for transcriptome profiling enabling researchers to study average gene expression over bulks of cells \cite{Wang2009, Goodwin2016}.  The advent of single cell RNA-seq (scRNA-seq) enabled high-throughput transcriptome profiling of single cells and disrupted research on developmental trajectories, cell-to-cell heterogeneity and the discovery of novel cell types, amongst others \cite{Lonnberg2017, Buettner2015, Patel2014, Kolodziejczyk2015, Li2017, Usoskin2014}.
- 
-%Many experiments in modern biology study gene expression across experimental conditions.
-%The typical goal of these studies is the identification of crucial genes that are associated with the treatment, allowing the reconstruction of molecular pathways driving the biological response \cite{Moeys2016}.
-%These genes are often identified in differential expression (DE) analysis, where average gene expression estimates are compared between experimental conditions \cite{Love2014, Robinson2010a, Law2014}.
-%Over the last decade, gene expression studies have typically been performed using RNA-seq  \cite{Wang2009, Goodwin2016}.
-%%introduction of scrna-seq
-%However, RNA-seq technology is limited to the study of average gene expression over bulks of cells, typically in the thousands.
-%Recent advances have, however, allowed transcriptome profiling for single cells, i.e. single cell RNA-seq (scRNA-seq), which has been used to study stem cells, follow developmental trajectories, investigate cell-to-cell heterogeneity and discovering novel cell types \cite{Lonnberg2017, Buettner2015, Patel2014, Kolodziejczyk2015, Li2017, Usoskin2014}.
-In scRNA-seq, individual cells are first captured and the RNA is converted to cDNA in a reverse transcription step upon which vast amplification of the minute amount of starting material occurs prior to sequencing. \cite{Kolodziejczyk2015a}.
-Many scRNA-seq protocols have been published to conduct these core steps \cite{Nakamura2015, Wu2013a, Islam2013, Islam2011, Picelli2014, Hashimshony2016a}, but despite these advances, scRNA-seq data remains inherently noisy.
-Dropout events cause many transcripts to go undetected due to inefficient cDNA polymerisation, amplification bias or low sequencing depth, leading to excessive zero counts, as compared to bulk RNA-seq data \cite{Hashimshony2016a, Finak2015}.
-The presence of dropouts suggest two different types of zeros in scRNA-seq data: biological zeros, when a gene is simply not expressed in the cell, and excess zeros, when a gene is expressed in the cell but it was not observed for technical reasons other than a low sequencing depth. 
-In the count data analysis literature this is also referred to as zero-inflation.
-In addition, scRNA-seq counts are inherently more variable than bulk RNA-seq data because the transcriptional signal is not averaged across thousands of individual cells (Additional File 1: Figure S1), making cell-to-cell heterogeneity, cell type mixtures and stochastic expression bursts important contributors to between-sample variability \cite{Raj2006, Buettner2015}.
+Transcriptomics has become one of the standard tools in modern biology to unravel the molecular basis of biological processes and diseases. One of the most common applications of transcriptome profiling is the discovery of \textit{differentially expressed} (DE) genes, which exhibit changes in expression levels across conditions \citep{Love2014, Robinson2010a, Law2014}. Over the last decade, transcriptome sequencing (RNA-seq) has become the standard technology for transcriptome profiling, enabling researchers to study average gene expression over bulks of thousands of cells \citep{Wang2009, Goodwin2016}.  
+The advent of single-cell RNA-seq (scRNA-seq) enables high-throughput transcriptome profiling at the resolution of single cells and allows, among other things, research on cell developmental trajectories, cell-to-cell heterogeneity, and the discovery of novel cell types \citep{Lonnberg2017, Buettner2015, Patel2014, Kolodziejczyk2015, Li2017, Usoskin2014}.
 
-%modelling of rna-seq data
-In RNA-seq applications, abundances are typically estimated by using counts, which represent the number of sequencing reads mapping to an exon, transcript or gene.
-Popular RNA-seq DE tools like edgeR \cite{Robinson2010a} and DESeq2 \cite{Love2014} assume a negative binomial count distribution across biological replicates, while limma-voom \cite{Law2014} uses linear models to model log-transformed counts and observation-level weights to account for the mean-variance relationship of the count data.
-%analysis of scrna-seq data
-These bulk RNA-seq tools have can also be applied for scRNA-seq DE analysis \cite{Lun2016} .
-However, dropouts and high variability in scRNA-seq data raised concerns about the utility of existing bulk RNA-seq tools for  scRNA-seq data analysis.
-This has triggered the development of novel dedicated tools, which typically introduce an additional component to account for excessive zero counts through, for example, zero-inflated (scde \cite{Kharchenko2014}) or hurdle models (MAST \cite{Finak2015}).
-However, Jaakkola et al. (2016) \cite{Jaakkola2016} and Soneson \& Robinson (2017) \cite{Soneson2017} have recently shown that these bespoke tools do not reveal systematic benefits over standard RNA-seq tools in scRNA-seq applications.
+In scRNA-seq, individual cells are first captured, their RNA is then reverse-transcribed into cDNA, which is greatly amplified from the minute amount of starting material, and the resulting library is finally sequenced \citep{Kolodziejczyk2015a}. Transcript abundances are typically estimated by counts, which represent the number of sequencing reads mapping to an exon, transcript, or gene. Many scRNA-seq protocols have been published to conduct such core steps \citep{Nakamura2015, Wu2013a, Islam2013, Islam2011, Picelli2014, Hashimshony2016a}, but despite these advances, scRNA-seq data remain inherently noisy. \textit{Dropout} events cause many transcripts to go undetected for technical reasons, such as inefficient cDNA polymerization, amplification bias, or low sequencing depth, leading to an excess of zero read counts as compared to bulk RNA-seq data \citep{Hashimshony2016a, Finak2015}. In addition, excess zeros can also occur for biological reasons, such as transcriptional bursting \citep{Raj2008}. 
+There are therefore two types of zeros in scRNA-seq data: \textit{biological zeros}, when a gene is simply not expressed in the cell, and \textit{technical zeros} (i.e., dropouts), when a gene is expressed in the cell but not detected. \textit{Zero inflation}, i.e., excess zeros compared to standard count distributions (e.g., negative binomial) used in bulk RNA-seq, occurs for both biological and technical reasons and disentangling the two sources is non-trivial. In addition, scRNA-seq counts are inherently more variable than bulk RNA-seq counts because the transcriptional signal is not averaged across thousands of individual cells (Additional File 1: Figure \ref{fig:varComp}), making cell-to-cell heterogeneity, cell type mixtures, and stochastic expression bursts important contributors to between-sample variability \citep{Raj2006, Buettner2015}.
 
+Typical scRNA-seq data analysis workflows often involve identifying cell types \textit{in silico} using tailored clustering algorithms \citep{Pierson2015, Risso2017} or ordering cells along developmental trajectories, where cell types are defined as terminal states of the developmental process \citep{Setty2016, Qiu2017, Lonnberg2017, Street2017}. A natural subsequent step is the discovery of marker genes for the defined cell types by assessing differential gene expression between these groups; this is the use case for our method.
 
-We argue that standard RNA-seq tools, however, still suffer in performance due to zero-inflation with respect to the negative binomial distribution.
-We illustrate this using biological coefficient of variation (BCV) plots \cite{McCarthy2012}, which visualize the mean-variance relationship of the counts.
-Note, that the BCV plots of scRNA-seq datasets contain striped patterns (Additional File 1: Figure S2 for scRNA-seq datasets subsampled to ten samples), that are indicative for genes with few positive counts (Additional File 1: Figure S3) and very high dispersion estimates.
-Randomly adding zeros to bulk RNA-seq data, likewise consisting of ten samples, also results in very similar striped patterns (Figure \ref{fig:introRNAseq}).
-The negative binomial models implemented in DESeq2 and edgeR will thus accommodate excess zeros by overestimating the dispersion parameter, which jeopardizes the power to discover differential expression in the presence of zero-inflation.
-However, a correct identification of the introduced excess zeros and downweighting them by assigning a weight of zero in dispersion estimation and model fitting reconstructs the original mean-variance relationship (Figure \ref{fig:introRNAseq}c), recovering the power to detect differential expression (Figure \ref{fig:introRNAseq}d).
-Hence, identifying and downweighting excess zeros provide the key to unlock RNA-seq tools for scRNA-seq differential expression analysis.
+Popular bulk RNA-seq DE tools, such as those implemented in the Bioconductor R packages \RPack{edgeR} \citep{Robinson2010a} and \RPack{DESeq2} \citep{Love2014}, assume a negative binomial (NB) count distribution across biological replicates, while limma-voom \citep{Law2014} uses linear models for log-transformed counts and observation-level weights to account for the mean-variance relationship of the count data. Such tools can also be applied for scRNA-seq DE analysis \citep{Lun2016}. However, dropouts, transcriptional bursting, and high variability in scRNA-seq data raise concerns about their validity. This has triggered the development of novel dedicated tools, which typically introduce an additional model component to account for the excess of zeros through, for example, zero-inflated (\RPack{SCDE}, \citet{Kharchenko2014}) or hurdle (\RPack{MAST}, \citet{Finak2015}) models. However, \citet{Jaakkola2016} and \citet{Soneson2017} have recently shown that these bespoke tools do not provide systematic benefits over standard bulk RNA-seq tools in scRNA-seq applications.
 
-We therefore propose \texttt{zingeR} (Zero Inflated Negative binomial Gene Expression in R), a tool for scRNA-seq DE analysis using a zero-inflated negative binomial (ZINB) distribution.
-\texttt{zingeR} efficiently identifies excess zeros and provides observation weights to unlock bulk RNA-seq pipelines for zero-inflation.
-\texttt{zingeR} is shown to outperform competing methods on simulated RNA-seq and simulated scRNA-seq datasets. 
-We also demonstrate \texttt{zingeR}'s gain in performance in a case study on a differential expression analysis between neuronal cell types using publicly available data.
-The method and  a novel simulation framework for scRNA-seq data are incorporated in the R package \texttt{zingeR} and are available at \url{https://github.com/statOmics/zingeR}.
+We argue that standard bulk RNA-seq tools, however, still suffer in performance due to zero inflation with respect to the negative binomial distribution. We illustrate this using biological coefficient of variation (BCV) plots \citep{McCarthy2012}, which represent the mean-variance relationship of the counts.
+Note that the BCV plots of scRNA-seq data exhibit striped patterns (Figure \ref{fig:introRNAseq}a-b and Additional File 1: Figure \ref{fig:bcvConquer} for scRNA-seq datasets subsampled to ten cells) that are indicative of genes with few positive counts (Additional File 1: Figure \ref{fig:trapnellColored}) and very high dispersion estimates. Randomly adding zeros to bulk RNA-seq data, likewise consisting of ten samples, also results in 
+similar striped patterns (Figure \ref{fig:introRNAseq}c-d). Negative binomial models, as implemented in \RPack{DESeq2} and \RPack{edgeR}, will thus accommodate excess zeros by overestimating the dispersion parameter, which jeopardizes the power to infer differential expression. However, by correctly identifying the excess zeros and downweighting them in the dispersion estimation and model fitting, one reconstructs the original mean-variance relationship (Figure \ref{fig:introRNAseq}e), thus recovering the power to detect differential expression (Figure \ref{fig:introRNAseq}f). Hence, identifying and downweighting excess zeros provides the key to unlocking bulk RNA-seq tools for scRNA-seq differential expression analysis. Note that  methods based on a zero-inflated negative binomial (ZINB) model naturally implement such an approach: Excess zeros are attributed weights through the zero inflation probability and inference can be focused on the mean of the negative binomial count component. 
+
+We therefore propose a weighting strategy based on ZINB models to unlock bulk RNA-seq tools for scRNA-seq DE analysis. In this manuscript, we build on
+%In the present manuscript, we therefore propose a weighting strategy for scRNA-seq DE analysis using 
+the zero-inflated negative binomial-based wanted variation extraction (ZINB-WaVE) method of \citet{Risso2017}, designed specifically for scRNA-seq data. ZINB-WaVE efficiently identifies excess zeros and provides gene and cell-specific weights to unlock bulk RNA-seq pipelines for zero-inflated data. As most bulk RNA-seq DE methods are based on generalized linear models (GLM), which readily accommodate observation-level weights, our approach seamlessly integrates with standard pipelines (e.g., \RPack{edgeR}, \RPack{DESeq2}, \RPack{limma}). Our method is shown to outperform competing methods on simulated bulk and single-cell RNA-seq datasets. We also illustrate our method on two publicly available real datasets. As detailed in the ``Software implementation'' section, our approach is implemented in open-source Bioconductor R packages and the code for reproducing the analyses presented in this manuscript is provided in a GitHub repository. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Results                   %%
@@ -402,296 +391,353 @@ The method and  a novel simulation framework for scRNA-seq data are incorporated
 
 \section*{Results}
 
-\subsection*{Extension of bulk RNA-seq tools towards zero-inflation}
+\subsection*{ZINB-WaVE extends bulk RNA-seq tools to handle zero-inflated data}
+% \lc{I feel that we should give the intuition of our approach here:
+% \begin{enumerate}
+% \item We therefore propose to model the data with ZINB models
+% \item Inference is done using the count component of the model
+% \item Parameters of the count component in ZI models are estimated by downweighting excess zeros
+% \item Hence, we can unlock standard bulk RNA-seq methods for ZI by adopting weights, which has the advantage that they also borrow strength accross genes for the estimation of the overdispersion.
+% \item In our contribution we propose to use ZINB-WaVE for this purpose (because of the advantages given below), but our approach is generic and researchers might choose to adopt their own weights.
+% \end{enumerate}}
 
-\fanny{Rephrase and add part on ZINB-WaVE. In \cite{Risso2017}, we proposed Zero-Inflated Negative Binomial-based Wanted Variation Extraction (ZINB-WaVE), a general and flexible method that uses a zero-inflated negative binomial (ZINB) model to extract low-dimensional signal from scRNA-seq read counts, accounting for zero inflation (dropouts), over-dispersion, and the discrete nature of the data. According to the ZINB-WaVE model, the posterior probability of belonging to the negative binomial (NB) count component for cell $i$ and gene $j$ can be computed as follows
-\begin{equation}W_{ij} = \frac{ ( 1 - \pi_{ij} ) f_{NB}(y_{ij}; \mu_{ij}, \theta_j ) }{f_{ZINB}(y_{ij};\mu_{ij}, \theta_j, \pi_{ij})},
+% Previous text before lc edit. 
+%In this manuscript, we argue that standard bulk RNA-seq methods for inferring differential gene expression suffer from zero inflation with respect to the negative binomial distribution when applied to scRNA-seq data. We propose instead to model scRNA-seq data using a zero-inflated model and perform inference on the count component of the model by downweighting excess zeros. That is, we unlock bulk RNA-seq methods using weights inferred from a ZINB model, allowing us, in particular, to borrow strength across genes to estimate dispersion parameters. 
+
+We argue that standard bulk RNA-seq methods for inferring differential gene expression suffer from zero inflation with respect to the assumed negative binomial distribution when applied to scRNA-seq data. We propose instead to model scRNA-seq data using a zero-inflated model and perform inference on the count component of the model, which is equivalent to standard NB regression where excess zeros are downweighted based on posterior probabilities (weights) inferred from a ZINB model. Such weights play a central role in many estimation approaches for ZINB models  (e.g., \citep{Cameron2013}). In this contribution, we show that the weights can effectively unlock bulk RNA-seq methods for zero-inflated data, allowing us, in particular, to borrow strength across genes to estimate dispersion parameters. Here, we use weights derived from the zero-inflated negative binomial-based wanted variation extraction (ZINB-WaVE) method of \citet{Risso2017}, which is a general and flexible framework for the extraction of low-dimensional signal from scRNA-seq read counts, accounting for zero inflation (i.e., dropouts, bursting), over-dispersion, and the discrete nature of the data. Note that although we focus on ZINB-WaVE weights, our weighted DE approach is generic and researchers might choose to \lc{adopt} their own weights. %substitute their own weights.
+
+A zero-inflated negative binomial (ZINB) distribution is a two-component mixture between a point mass at zero and a negative binomial distribution. Specifically, the density function for the ZINB-WaVE model is
+\begin{equation}
+\label{e:zinb}
+f_{ZINB}(y_{ij};\mu_{ij}, \theta_j, \pi_{ij}) = \pi_{ij}\delta_0(y_{ij}) + (1-\pi_{ij})f_{NB}(y_{ij}; \mu_{ij}, \theta_j ),
 \end{equation}
-where $y_{ij}$ denotes the read count for gene $j$ in cell $i$ and $f_{NB}(\cdot; \mu, \theta)$ and $f_{ZINB}(\cdot; \mu, \theta, \pi)$ denote, respectively, the NB and ZINB probability mass functions with mean $\mu$, dispersion $\theta$, and dropout probability $\pi$ (see Methods section for notation and details about the model). As in \cite{VandenBerge2017ZingeR:Applications}, the posterior probabilities $W_{ij}$ can be used as observation-level weights in tools for bulk RNA-seq differential expression (DE) analysis such as edgeR, DESeq2, or limma-voom.}
+where $y_{ij}$ denotes the read count for cell $i$ and gene $j$, $\pi_{ij}$ the mixture probability for zero inflation, $f_{NB}(\cdot; \mu_{ij}, \theta_{j})$ the negative binomial probability mass function with mean $\mu_{ij}$ and dispersion $\theta_j$, and $\delta_0$ the Dirac delta function (see Equations \eqref{e:zinb0} and \eqref{e:zinbwave}).  
+The ZINB-WaVE parameterization of the NB mean $\mu$ and ZI probability $\pi$ in Equation \eqref{e:zinbwave} allows adjusting for both known (e.g., \lc{treatment}, batch, quality control measures) and unknown (RUV) \citep{Gagnon-Bartsch2012, Risso2014NormalizationSamples} cell-level covariates, i.e., supervised and unsupervised normalization, respectively. It also allows adjusting for known gene-level covariates (e.g., length, GC-content). 
+The ZINB-WaVE model and its associated penalized maximum likelihood estimation procedure are described more fully in the ``Methods'' section and in \citet{Risso2017}. 
 
-In this manuscript, we argue that standard RNA-seq tools applied in scRNA-seq applications still suffer from zero-inflation with respect to the negative binomial distribution.
-We propose a tool for scRNA-seq DE analysis using a zero-inflated NB (ZINB) distribution, a two component mixture between a point mass at zero ($\delta$) and a NB distribution ($f_{NB}$)
+From the ZINB-WaVE density of Equation \eqref{e:zinb}, one can readily derive the posterior probability that a count $y_{ij}$ was generated from the negative binomial count component 
+\begin{equation} 
+\label{e:weights}
+w_{ij} = \frac{ ( 1 - \pi_{ij}) f_{NB}(y_{ij}; \mu_{ij}, \theta_{j} ) }{f_{ZINB}(y_{ij};\mu_{ij}, \theta_{j}, \pi_{ij})}.
+\end{equation} 
+We propose to use these probabilities as weights in bulk RNA-seq DE analysis methods, such as those implemented in the Bioconductor R packages \RPack{edgeR}, \RPack{DESeq2}, and \RPack{limma} (limma-voom method with \RObj{voom} function). All of these methods are based on the methodology of generalized linear models, which readily accommodates inference based on observation-level weights. Note that although the ZINB-WaVE weights are gene and cell-specific, the GLMs are fit gene by gene; hence, for a given gene, the cell-specific weights are used as observation-specific weights in the GLMs. The implementation of the weighting strategy for \RPack{edgeR}, \RPack{DESeq2}, and limma-voom is described in greater detail in the ``Methods'' section.
 
-\[ f_{ZI}(y_{gi}; \mu_{gi}, \phi_g, \pi_i) = \pi_i\delta + (1-\pi_i)f_{NB}(\mu_{gi},\phi_g) \]
+\subsection*{Impact of zero inflation on mean-variance relationship}
+We have already noted that adding zeros to bulk RNA-seq data results in an overestimation of the dispersion parameter. This leads to striped patterns in the BCV plot (Figure \ref{fig:introBCV}a), which are indicative of genes with many zeros (Additional File 1: Figure \ref{fig:trapnellColored}) and very high dispersion estimates. Our ZINB-WaVE method, however, identifies many of the introduced excess zeros as such (Figure \ref{fig:introBCV}a-b), by classifying them in the zero-inflated component of the ZINB mixture distribution. Using our posterior probabilities as observation-level weights in \RPack{edgeR} recovers the original BCV plot and mean-variance trend (Figure \ref{fig:introBCV}c), illustrating the ability of our method to account for zero inflation. Hence, the ZINB-WaVE weights provide the key to unlocking standard bulk RNA-seq tools for zero-inflated data. 
 
-with $y_{gi}$ the expression counts for gene $g$ in sample $i$, $\pi_i$ the mixture probability for an excess zero count, $\mu_{gi}$ and $\phi_g$ respectively the negative binomial mean and dispersion parameters.
-zingeR uses the EM-algorithm for fitting the mixture distribution, where we use the association between the cell's sequencing depth and zero abundance to estimate $\pi_i$.
-Upon convergence, zingeR produces posterior probabilities that a zero belongs to the count component
+The BCV plot for the \citet{Islam2011} scRNA-seq dataset (Figure \ref{fig:introBCV}d) shows similar striped patterns as for zero-inflated bulk RNA-seq data. Such patterns are observed in many single-cell datasets (Additional File 1: Figure \ref{fig:bcvConquer}). 
+%\lc{ Relic from zinger paper?? Excess zeros in scRNA-seq originate for multiple reasons, including shallow sequencing depth. }\fanny{Koen, I'll let you rephrase or remove the sentences you want.}
+ZINB-WaVE identifies many zeros to be excess for the Islam dataset. It also provides good classification power for excess zeros for data simulated from the Islam dataset (Figure \ref{fig:introBCV}e). Incorporating the ZINB-WaVE weights in an \RPack{edgeR} analysis removes the striped patterns and yields a BCV plot that is similar to that for bulk RNA-seq data (Figure \ref{fig:introBCV}f), suggesting that zero inflation was indeed present and accounted for.
 
-\begin{equation} \label{eq:weights}
-w_{gi}=\frac{(1-\pi_i)f_{NB}(\mu_{gi},\phi_g)}{f_{ZI}(y_{gi}; \mu_{gi}, \phi_g, \pi_i)},
-\end{equation}
+\subsection*{High power and false positive control on simulated (sc)RNA-seq data}
+%{\color{blue} *** FP: Messages:
+%\begin{enumerate}
+%  \item High sensitivity and specificity on scRNA-seq simulated data. Comparison between the different methods (ROC and pvalue distrib) for 10x and Islam datasets. From our previous plots, our method should be the best followed by MAST with the adaptive thresholding followed by the bulk rna seq tools (edgeR, DESeq2,limmavoom). See Figure for fold change 2 and suppl. fig. for fold change 3.
+%  \item no big difference between genewise and common dispersion. See supplementary figures. Could be explained by no big diff in weights and disp. See supplementary figures. Genewise dispersion is 15 times slower than common. We think that common dispersion is a good approximation. This point could be moved to discussion eventually.
+%  \item \koen{Will add evaluation for different $\epsilon$ on sims}
+%\end{enumerate}
+%}
+We provide a scRNA-seq data simulation paradigm that retains gene-specific characteristics as well as global associations across all genes (see ``Methods'' for details).
+More specifically, we first estimate dataset-specific associations between zero abundance, sequencing depth, and average log counts per million (CPM), and next explicitly account for these associations in our simulation model (Additional File 1: Figures \ref{fig:zeroLibConquer}--\ref{fig:zeroCpmConquer}).
 
-which can be used as observation weights in the analysis.
-We build upon edgeR to fit the ZINB model and assess DE using the negative binomial component of the mixture.\\
-As in the introduction, we will demonstrate the problem and the solution provided by the zingeR method using BCV plots.
-We have already noted that adding zeros to bulk RNA-seq data results in striped patterns (Figure  \ref{fig:introRNAseq}b, \ref{fig:introBCV}a), that are indicative for genes with few positive counts (Additional File 1: Figure S3) and very high dispersion estimates.
-The zingeR model, however, identifies many introduced excess zeros as such (Figure \ref{fig:introBCV}a-c), by classifying them to the zero-inflation component of the ZINB mixture distribution.
-As expected, distinguishing biological from excess zeros is harder for genes with a lower expression, since those genes often have higher dispersion estimates (Figure \ref{fig:introBCV}b).
-Using zingeR posterior probabilities as observation-level weights in edgeR recovers the original BCV plot and mean-variance trend (Figure \ref{fig:introBCV}d), illustrating zingeR's ability to account for zero-inflation.
-Hence, they provide the key to unlocking standard RNA-seq tools for zero-inflation.
-The BCV plot of the scRNA-seq Islam dataset (Figure \ref{fig:introBCV}e) shows a similar striped pattern as in the zero-inflated RNA-seq data.
-For scRNA-seq data, however, we also observed a trend between zero abundance and the cell's sequencing depth (Additional File 1: Figure S4), information that we integrate in the zingeR model component for excess zeros (Figure \ref{fig:introBCV}f).
-Moreover, the data are more variable and the zero-inflation pattern is more subtle than in the RNA-seq example, resulting in a higher classification uncertainty of the zeros  (Figure \ref{fig:introBCV}g). 
-However, also in scRNA-seq applications, a decrease in dispersion estimates is achieved (Figure \ref{fig:introBCV}h), suggesting that zero-inflation patterns were indeed present and have been accounted for.
+The scRNA-seq simulation study is based on three datasets: the \citet{Islam2011} dataset, comparing $48$ embryonic stem cells to $44$ embryonic fibroblasts in the mouse; a subset of the \citet{Trapnell2013} dataset, comparing differentiating human myoblasts at the 48h ($85$ cells) and 72h ($64$ cells) timepoints; and a 10x Genomics peripheral blood mononuclear cells (PBMC) dataset (see ``Real datasets'' section in ``Methods'' for details). The datasets differ in throughput, sequencing depth, and extent of zero inflation, e.g., Additional File 1: Figure \ref{fig:postProbRealData} shows a higher proportion of excess zeros in the Islam dataset as compared to the Trapnell dataset, an observation further supported by the fact that the Islam and Trapnell datasets contain $\sim 65\%$ and $\sim 48\%$ zeros, respectively. 
+10x Genomics datasets are known to contain even more zeros; the evaluated subset of the PBMC dataset contains $\sim 87\%$ zeros. 
+The simulated datasets successfully mimic the characteristics of the original datasets, as evaluated with the R package \RPack{countsimQC} \citep{Soneson2017a} (Additional Files 2--4 \koen{would propose to add countsimQC HTML files as Additional Files.}). This diverse range of datasets is therefore representative of scRNA-seq datasets that occur in practice and a suitable basis for method evaluation and comparison. 
+%The datasets differ in their extent of zero inflation with respect to the negative binomial distribution (Additional File 1: Figure \ref{fig:postProbRealData}) \fanny{Figure \ref{fig:postProbRealData} does not really show the difference of zero inflation, it shows the estimated posterior probabilities of belonging to the count NB part. Maybe additionally stating the percentage of zeros in the two datasets would make the point better?} throughput and sequencing depth and provide a basis for method evaluation and comparison for scRNA-seq datasets that occur in practice. 
 
-\subsection*{High power and low Type I error rates on scRNA-seq simulated data}
+We evaluate method performance in terms of sensitivity and false positive control using false discovery proportion - true positive rate (FDP-TPR) curves.  
+Figure \ref{fig:scRNASeqPerf} (Additional File 1: Figure \ref{fig:suppScRNASeqPerf}) illustrates that many methods break down on the simulated Islam dataset due to a high degree of zero inflation.
+Surprisingly, even methods specifically developed to deal with excess zeros, like \RPack{SCDE} and \RPack{metagenomeSeq}, suffer from poor performances, with \RPack{MAST} being a notable exception.
+The \RPack{DESeq2} methods, however, are able to cope with the high degree of zero inflation.
+Note that, in general, it is a good strategy to disable the outlier imputation step in \RPack{DESeq2}, since it deteriorates performance on scRNA-seq data (Additional File 1: Figure \ref{fig:suppScRNASeqDESeq2}).
+% * <michaelisaiahlove@gmail.com> 2017-12-07T20:28:09.824Z:
+% 
+% i added the word "outlier" here, to make it clear what imputation step
+% 
+% ^.
+\RPack{Seurat}, limma-voom, and \RPack{SCDE} have very low sensitivity.
+The methods based on ZINB-WaVE weights dominate all competitors in terms of sensitivity and specificity, providing high power, good false discovery rate (FDR) control, and sensible $p$-value distributions (Additional File 1: Figure \ref{fig:suppPvalIslam}).
+%These results persist even when simulating DE with high fold changes ($>3$)  (Additional File 1: Figure S11).
+%Although scde had good performances in the bulk RNA-seq simulations it has low power and bad FDR control in a high zero inflation setting.
+Note that the remaining methods also suffer from poor FDR control.
 
-\fanny{Merge rna seq and sc rna seq. We just want to have a sentence saying that with bulk rna seq our method works as well and have a suppl. fig. to show it.}
+Since zero inflation is fairly modest for the Trapnell dataset, most methods perform better than for the Islam simulation (Figure \ref{fig:scRNASeqPerf}).
+The ZINB-WaVE-based methods and \RPack{DESeq2} outperform the remaining methods in terms of sensitivity and provide good FDR control.
+\RPack{edgeR} is their closest competitor and the remaining methods provide much lower sensitivity and/or very liberal FDR control.
+Note how bespoke scRNA-seq methods seem to break down on datasets with a lower degree of zero inflation, often providing too liberal or too conservative $p$-value distributions, while ZINB-WaVE-based methods in general show a reasonable $p$-value distribution, with an enrichment of low $p$-values and approximately uniformly distributed larger $p$-values (Additional File 1: Figure \ref{fig:suppPvalTrapnell}).
 
-{\color{blue} *** FP: Messages:
-\begin{enumerate}
-\item High sensitivity and specificity on scRNA-seq simulated data
-  \begin{enumerate}
-  \item Comparison between the different methods (ROC and pvalue distrib) for 10X and Islam datasets. From our previous plots, our method should be the best followed by MAST with the adaptive thresholding followed by the bulk rna seq tools (edgeR, DESeq2,limmavoom). See Figure for fold change 2 and suppl. fig. for fold change 3.
-  \item no big difference between genewise and common dispersion. See supplementary figures. Could be explained by no big diff in weights and disp. See supplementary figures. Genewise dispersion is 15 times slower than common. We think that common dispersion is a good approximation. This point could be moved to discussion eventually.
-  \end{enumerate}
+Typical 10x Genomics datasets contain a high number of cells with shallow sequencing depth, due to the extreme multiplexing of libraries. 
+As a result, counts and hence estimated NB means are lower, making zeros more plausible according to the NB distribution and excess zeros thus harder to identify.
+This is picked up by the simulation framework, where only $\sim 8\%$ of the genes were simulated to have at least one excess zero in $n=1,200$ samples.
+Bulk RNA-seq methods can hence be expected to be among the top performers. 
+Figure \ref{fig:scRNASeq10xPerf} shows FDP-TPR curves for the 10x Genomics simulation study, demonstrating a good performance of bulk RNA-seq methods \RPack{edgeR} and \RPack{DESeq2}. 
+ZINB-WaVE \RPack{edgeR} and ZINB-WaVE \RPack{DESeq2} are among the top performers, having comparable or slightly lower performance as compared to their unweighted counterparts.
+\RPack{MAST} is their closest competitor, providing good sensitivity and FDR control.
+\RPack{SCDE}, \RPack{NODES}, \RPack{metagenomeSeq}, and limma-voom have lower sensitivity and/or very liberal FDR control as compared to the dominating methods. 
+These results suggest that, in a scenario of low counts or low degree of zero inflation, ZINB-WaVE \RPack{edgeR}/\RPack{DESeq2} reduce to standard unweighted \RPack{edgeR}/\RPack{DESeq2},  %(as the weights in Equation \eqref{e:weights} are nearly 1)
+while other bespoke scRNA-seq tools may deteriorate in performance. 
+This notion is further supported by results on simulated bulk RNA-seq data, where ZINB-WaVE \RPack{edgeR}/\RPack{DESeq2} almost exactly converge to \RPack{edgeR}/\RPack{DESeq2} in the absence of zero inflation (Additional File 1: Figure \ref{fig:rnaseqSim}).
+Hence, adopting ZINB-WaVE-based DE methods has been shown to provide a performance boost in zero inflated applications, while performance is not significantly deteriorated in the absence of zero inflation.
+%\lc{Shouldn't we argue that due to the very low counts in 10x data in general, that it is very difficult to discriminate between ZI and overdispersion due to issues with identifiability? Perhaps we can evaluate this on real data too. What happens on the USOSKIN dataset when we subsample it to the level of 10x libsizes?} %\koen{no longer a(n average) performance difference between protocols with new DESeq2. Also, not sure if thinning full-length/$3'$ data will come close to UMI data. We would have to take into account e.g. lengths of transcripts/genes. Point became obsolete?}
 
-\item Controlled FDR at 0.05 on scRNA-seq simulated data
-  \begin{enumerate}
-  \item FDR is controlled on neuronal cells and 10X-genomics
-  \item Influence of epsilon on FPR and distribution pvalues. This point could be moved to discussion eventually.
-  \end{enumerate}
+All analyses performed in this work are based on estimating one common dispersion parameter across all genes for the ZINB-WaVE model. ZINB-WaVE allows the estimation of genewise dispersion parameters, however, this approach is much more computationally intensive and can be an order of magnitude slower. Additional File 1: Figures \ref{fig:suppScRNASeqPerf} and \ref{fig:suppScRNASeq10xPerf} show that estimating genewise dispersion parameters does not seem to be required for calculating the ZINB-WaVE weights, since no gain in performance is achieved when doing so. Note that genewise dispersions are still estimated by \RPack{edgeR} and \RPack{DESeq2} in the final DE inference procedure.
 
-\end{enumerate}
-}
+\subsection*{False positive rate control}
 
-===================== beginning of rna seq\\
-First, we evaluate zingeR in an RNA-seq context. We use zingeR weights in conjunction with edgeR (zingeR\_edgeR) and DESeq2 (zingeR\_DESeq2) and compare them to state-of-the-art bulk RNA-seq tools edgeR \cite{Robinson2010a,McCarthy2012}, DESeq2 \cite{Love2014} with default and positive counts normalization (see Online Methods) and limma-voom \cite{Law2014}; scRNA-seq dedicated tools scde \cite{Kharchenko2014}, MAST \cite{Finak2015} and NODES \cite{Sengupta2016}; and metagenomeSeq \cite{Paulson2013} developed for zero-inflation in metagenomics applications.
-We use the framework from Zhou et al. (2014) \cite{Zhou2014} to estimate gene-wise parameters from the Bottomly dataset \cite{Bottomly2011} and simulate RNA-seq counts for a two-group comparison according to a gene-wise negative binomial distribution where the means and dispersions are jointly sampled to respect the original mean-variance relationship.
-In a first scenario, we evaluate the methods in a zero-inflated RNA-seq setting, by randomly replacing 5\% of all counts with excess zeros.
-The false discovery proportion - true positive rate (FDP-TPR) curves (Figure \ref{fig:RNASeqPerf}) clearly illustrate that all conventional RNA-seq DE tools break down since the excess zeros inflate dispersion estimates (Figure \ref{fig:introBCV}b) and thus compromise performance.
-zingeR, however, correctly identifies excess zeros, and thus recovers the original mean-variance relationship, boosting performance for the differential expression analysis.
-zingeR\_edgeR has superior performances in this simulation, but is closely followed by zingeR\_DESeq2 and scde.
-However, scde provides very conservative FDR control as suggested by its FDR working points.
-All three methods use a zero-inflated negative binomial distribution to model the counts, and convincingly outperform the other tools.
-MAST also outperforms the bulk RNA-seq tools, but is inferior to the methods using zero-inflated distributions.
-Furthermore, zingeR\_edgeR and zingeR\_DESeq2 even attain a similar performance as an edgeR or DESeq2 analysis using the ground truth, i.e. by assigning excess zeros a zero weight, clearly demonstrating the correct identification of excess zeros by the zingeR algorithm.
-Moreover, in the absence of zero-inflation, the performance of zingeR\_edgeR and zingeR\_DESeq2 is not deteriorated (Figure \ref{fig:RNASeqPerf}) and they converge to a regular edgeR (DESeq2) analysis.
-Hence, adopting the zingeR methods will not harm the analysis in any case.\\
-================ end of RNA-Seq\\
+We compared our ZINB-WaVE-weight-based method to commonly-used DE methods for mock comparisons based on two publicly available scRNA-seq real datasets. We assessed performance based on the per-comparison error rate (PCER), defined as the proportion of false positives (i.e., Type I errors) among all genes being considered for DE, where a gene is declared DE if its unadjusted $p$-value is less than or equal to $0.05$. 
 
-The RNA-seq simulation study has shown that tools adopting zero-inflated distributions have superior performances in an RNA-seq setting with excess zeros.
-scRNA-seq data, however, are noisier than RNA-seq data and the excess zeros do not occur completely at random. 
-Therefore, we provide a scRNA-seq data simulation paradigm that retains gene-specific characteristics as well as global associations across all genes.
-More specifically, we estimate the dataset-specific associations between zero abundance with the sequencing depth and average expression rates and explicitly model this in our simulation framework (Additional File 1: Figures S4-S5).
-The scRNA-seq simulation is based on two datasets: the Islam \cite{Islam2011} mouse dataset, which compares 48 embryonic stem cells to 44 embryonic fibroblasts in mouse, and the 48h and 72h timepoints of the human Trapnell \cite{Trapnell2013} dataset, comparing differentiating human myoblasts at the 48h (85 cells) and 72h (64 cells) timepoints.
-The datasets differ in their extent of zero-inflation (Additional File 1: Figure S6) and provide a basis for method evaluation and comparison at different degrees of zero-inflation that occur in practice. 
-The simulated datasets successfully mimic the characteristics of the original datasets (Additional File 1: Figures S7-S8), suggesting good quality of the simulated data.
-Figure \ref{fig:scRNASeqPerf} (Additional File 1: Figure S9)  illustrates that many methods break down on the simulated Islam dataset due to a high degree of zero-inflation.
-Surprisingly, even methods specifically developed to deal with excess zeros like MAST, scde and metagenomeSeq suffer from poor performances.
-The DESeq2 methods, however, are able to cope with a high degree of zero-inflation.
-In general, it is a good strategy to disable the imputation step in DESeq2, since it deteriorates its performance in scRNA-seq data (Additional File 1: Figure S10).
-The zingeR models dominate all competitors in terms of sensitivity and specificity, providing high power and good FDR control.
-These results persist even when simulating DE with high fold changes ($>3$)  (Additional File 1: Figure S11).
-Although scde had good performances in the bulk RNA-seq simulations it has low power and bad FDR control in a high zero-inflation setting.
-Note, however, that the remaining methods also suffer from poor FDR control.
+The first dataset, referred to as Usoskin \citep{Usoskin2014} dataset, concerns $622$ mouse neuronal cells from the dorsal root ganglion, classified in eleven categories. The authors acknowledge the existence of a batch effect related to the picking session for the cells. We find that the batch effect is not only associated with expression measures, but also influences the relationship between sequencing depth and zero abundance (Figure \ref{f:fdrUsoskin}a) \citep{Hicks2015}. The large differences in sequencing depths between batches attenuate the overall association with zero abundance when cells are pooled across batches (Figure \ref{f:fdrUsoskin}a). We therefore added a covariate to account for the batch effect in both the negative binomial mean ($\mu$) and the zero inflation probability ($\pi$) of the ZINB-WaVE model used to produce the weights for DE analysis. Adjusting for batch yields weights with a slightly higher mode near zero, suggesting a more informative discrimination between excess and NB zeros (Figure \ref{f:fdrUsoskin}b). %\lc{search and replace all stretches where we make distinction between technical and biological zeros ==> excess zeros} 
+Although the batch effect is small in terms of the weights, this illustrates the generality and flexibility of our ZINB-WaVE weighting approach: through a suitable parameterization of both the NB mean and ZI probability one can adjust for effects that can bias the weights and hence the DE results. 
 
-Since zero-inflation is fairly modest in the Trapnell dataset, most methods perform better than in the Islam simulation (Figure \ref{fig:scRNASeqPerf}).
-zingeR\_edgeR, zingeR\_DESeq2, MAST and DESeq2 with positive counts normalization, outperform the remaining methods in this simulation in terms of sensitivity and provide good FDR control.
-scde is their closest competitor, however the method is again overly conservative.
-Notably, DESeq2 has very liberal FDR control, but the positive counts normalization results in a dramatic performance boost.
-The scRNA-seq method NODES provides good sensitivity, but it also suffers from a very liberal FDR control.
-Note, that the performance of all methods is still lower than in the bulk RNA-seq simulation due to the high level of noise associated with scRNA-seq experiments.
+For the Usoskin dataset, we assessed false positive control by comparing the \textit{actual} vs. the \textit{nominal} PCER for mock null datasets where none of the genes are expected to be differentially expressed. Specifically, we generated $30$ mock datasets where, for each dataset, two groups of $45$ cells each were created by sampling at random, without replacement $15$ cells from each of the three picking sessions. Sampling cells within batch allows to control for potential confounding by the batch variable. For each of the $30$ mock datasets, we considered seven methods to identify genes that are DE between the two groups and declared a gene DE if its nominal unadjusted $p$-value was less than or equal to $0.05$. For these mock datasets, any gene declared DE between the two groups is a false positive. Thus, for each method, the nominal PCER of $0.05$ is compared to the actual PCER which is simply the proportion of genes declared DE (Figure \ref{f:fdrUsoskin}c--d).
 
-\subsection*{Real data. Our method leads to biologically meaningful differentially expressed genes}
+The seven methods considered are: unweighted and ZINB-WaVE-weighted \RPack{edgeR}, unweighted and ZINB-WaVE-weighted \RPack{DESeq2}, unweighted limma-voom (ZINB-WaVE-weighted limma-voom was found to perform poorly in the simulation study and hence is not considered here), \RPack{MAST}, and \RPack{SCDE} (see ``Methods'' for details). 
+\RPack{edgeR} and \RPack{DESeq2} with ZINB-WaVE weights and unweighted \RPack{edgeR} controlled the PCER close to its nominal level (Figure \ref{f:fdrUsoskin}c). The unweighted versions of \RPack{DESeq2}, \RPack{MAST}, and \RPack{SCDE} tended to be conservative, whereas limma-voom tended to be anti-conservative. In addition, the weighted versions of \RPack{edgeR} and \RPack{DESeq2} and unweighted \RPack{edgeR} yielded near uniform $p$-value distributions (as expected under this complete null scenario), while unweighted \RPack{DESeq2}, \RPack{MAST}, and \RPack{SCDE} tended to yield conservative $p$-values (mode near 1) and limma-voom anti-conservative $p$-values (mode near 0)  (Figure \ref{f:fdrUsoskin}d). 
 
-\fanny{We would perform the clustering using zinbwave for the Usoskin. Move the FDR on mocks to the previous section as it is more a simulation that real data analysis. Add 10X-genomics analysis.}
+We also replicated the original analysis of \citet{Usoskin2014}, by performing one-against-all tests of DE for each cell type (Additional File 1: Figure \ref{fig:usoskinDE}). limma-voom found a high number of DE genes, confirming our results from the mock evaluations where it was too liberal. The ZINB-WaVE methods tended to find a high number of DE genes, which is promising combined with the good FPR control seen in the mock comparisons. While introducing ZINB-WaVE weights in \RPack{DESeq2} lead to a higher number of significant genes on average, the effect is less clear with \RPack{edgeR} and seems to depend on the contrast.
 
-{\color{blue} Messages:
-\begin{enumerate}
-\item Usoskin case study. From Koen's email: It may be convincing to redo the clustering with ZINB-WaVE followed by subsequent DE between the discovered cell types, and check for previously undiscovered results/marker genes. This would illustrate our use-case and might help to convince Reviewer 2. From what I understand from the original paper, they adopted the following workow: In the original paper, they dened four main neuronal cell types based on an initial PCA clustering. Next, pairwise dierential expression analysis was performed between these four main clusters, and genes that are dierentially expressed in at least one comparison for a particular cell type are then used for additional iterative clustering analyses per main neuronal cell type. Since this work ow is a combination of dierential expression and clustering, it may be a good example to showcase the method. Dening new cell types ourselves may be dicult, but it would already be good to check if we nd extra/dierent subgroups within their dened cell types (for which we have the labels), based on our DE and clustering method.
-\item 10x-genomics case study.
-\end{enumerate}
-}
+Similar results were observed for a 10x Genomics PBMC dataset comprising $2,700$ single cells sequenced on the Illumina NextSeq 500 (Additional File 1: Figure \ref{f:fdr10x}), with the distinction that we found a conservative $p$-value distribution for ZINB-WaVE-weighted \RPack{DESeq2}. Since no information was provided about potential batch effects, we did not consider batch covariates for this dataset. 
 
-Finally we apply zingeR to a publicly available scRNA-seq dataset for neuronal cell types in mouse \cite{Usoskin2014}.
-In this experiment, cells from the dorsal root ganglion were robotically picked and the 5' end of the transcripts were sequenced.
-After quality control, the authors considered 622 cells which were classified in eleven neuronal cell type categories.
-The authors acknowledge the existence of a batch effect that is related to the picking session of the cells, where all cells were picked in three separate picking sessions.
-We find that the batch effect is not only associated with expression but also influences the association of sequencing depth with zero abundance (Figure \ref{fig:usoskin}a) \cite{Hicks2015}.
-Large differences in sequencing depth between batches (picking sessions) causes an attenuation of the global association across all batches (Figure \ref{fig:usoskin}a).
-We therefore add the batch effect as a covariate in both the zingeR count model and zero-excess model.
-Upon correction for batch effects, a better identification of excess zeros is achieved (Figure \ref{fig:usoskin}b) with a higher classification certainty.
-This shows the generality of the zingeR method: both the count component as well as the zero-excess model component can be modelled in a very flexible way, providing an optimal assessment of differential expression while accounting for any factor that can improve the identification of excess zeros.
-The authors identify genes that characterize each cell type by comparing the expression for each neuronal cell type with the average expression of the remaining cell types.
-In the original manuscript, the analysis was performed with scde \cite{Kharchenko2014} with a batch correction procedure that accounts for the picking sessions.
-Supplementary Table 1 shows that all methods provide higher numbers of significant genes than scde, and zingeR\_edgeR has the highest number of significant genes across all methods.
-This is in agreement with the simulation studies, where zingeR\_edgeR typically provides highest sensitivity.
-However, since a higher number of differentially expressed genes may arise due to a higher number of false positives, we evaluated the false positive rate in this dataset using $30$ random $45$ vs. $45$ mock comparisons.
-In every condition, 15 cells from each of the three picking sessions are randomly selected over all cell types, thereby controlling for potential confounding by this batch variable, and we test for significance of the mock variable.
-The FPR is controlled by both zingeR variants, suggesting that the high number of significant genes for the zingeR models is not due to a higher fraction of false positives in the significance list (Figure \ref{fig:usoskin}c).
-The mock comparison also shows that limma-voom is too liberal in some evaluations and MAST consistently provides somewhat liberal results, while especially metagenomeSeq is extremely liberal.
-In addition, a uniform p-value distribution is observed for zingeR\_edgeR in the mock comparison, while there seems to be issues with the null distribution of the test statistics from DESeq2 methods and scde, which produce too conservative p-values (Additional File 1: Figure S12).
+Additionally, we examined the PCER and $p$-value distributions on mock comparisons while varying the regularization parameter ($\epsilon$) for the ZINB-WaVE estimation procedure. 
+Not surprisingly, we observed that the PCER decreases with increasing $\epsilon$, i.e., as the parameters of the ZINB-WaVE model are subjected to more ``shrinking'' (Additional File 1: Figures \ref{f:fdrEpsUsoskin} and \ref{f:fdrEps10x} for Usoskin and 10x Genomics PBMC datasets, respectively). 
+
+\subsection*{Biologically meaningful clustering and differential expression results}
+To analyze the $2,700$ cells from the 10x Genomics PBMC dataset (see ``Methods''), we followed the tutorial available at \url{http://satijalab.org/seurat/pbmc3k_tutorial.html} and used the R package \RPack{Seurat} \citep{Butler2017}. The major steps of the pipeline were quality control, data filtering, identification of high-variance genes, dimensionality reduction using the first ten components from principal component analysis (PCA), and graph-based clustering. The final step of the pipeline was to identify genes that are differentially expressed between clusters, in order to derive cell type signatures. Two different parameterizations were used for the \RPack{Seurat} clustering. With one parameterization, a single cluster was identified for CD4+ T-cells, while with another, two CD4+ T-cell subclusters were identified, corresponding to CD4+ naive T-cells and CD4+ memory T-cells (gold and red clusters in Figure \ref{f:tenxcaseNES}a, respectively). At the end of the tutorial, the authors concluded that the memory/naive split was weak and more cells would be needed to have a better separation between the two CD4+ T-cell subclusters.
+
+In order to find DE genes between the two CD4+ T-cell subclusters, we used \RPack{Seurat}, unweighted \RPack{edgeR}, ZINB-WaVE-weighted \RPack{edgeR}, \RPack{MAST}, and limma-voom. We then sought to identify cell types using gene set enrichment analysis (GSEA), with the function \RObj{fgsea} from the Bioconductor R package \RPack{fgsea} \citep{Sergushichev2016} and gene sets for $64$ immune and stroma cell types from the R package \RPack{xCell} \citep{Aran2017}. 
+While unweighted \RPack{edgeR} found that one cluster was enriched in both CD4+ memory and naive T-cells compared to the other cluster, our weighted-edgeR method as well as \RPack{Seurat}, and limma-voom found that the cluster was enriched in CD4+ T-effector memory, CD4+ T-central memory, and CD4+ memory T-cells, and depleted in CD4+ naive T-cells. \RPack{MAST} found that the cluster was depleted in CD4+ memory T-cells and CD4+ naive T-cells, but enriched in CD4+ T-effector memory and CD4+ T-central memory T-cells (see Figure \ref{f:tenxcaseNES}b and Additional File 1: Figure \ref{f:tenxcaseNESall}). This suggests that our ZINB-WaVE weights can successfully unlock \RPack{edgeR} for zero-inflated data, leading to \fanny{\sout{more}} biologically meaningful DE genes. It is reassuring that weighted \RPack{edgeR} performed so well on the real 10x Genomics PBMC dataset.
+
+While ZINB-WaVE can be used to compute weights in a supervised setting with \textit{a priori} known cell types, it can also be used to perform dimensionality reduction in an unsupervised setting. To demonstrate the ability of our method to find biologically relevant clusters and DE genes, we performed dimensionality reduction using ZINB-WaVE with $K=20$ unknown covariates (matrix $W$, see ``Methods''), where $K=20$ was chosen using the Akaike information criterion (AIC) (Additional File 1: Figure \ref{f:tenxcaseAICBIC}). We then used $W$, instead of the first $10$ components of PCA as in the \RPack{Seurat} tutorial, to cluster the cells using the \RPack{Seurat} graph-based clustering. We found similar clusters as the \RPack{Seurat} clusters, except for the NK-cell and B-cell clusters which were partitioned differently and the cluster with CD4+ T-cells (Additional File 1: Figure \ref{f:tenxcaseW}). Using this new clustering, GSEA showed a better separation between CD4+ naive T-cells and CD4+ memory T-cells for all the methods, suggesting a \fanny{\sout{more}} biological meaningful clustering using ZINB-WaVE dimensionality reduction instead of PCA. The CD4+ T-effector memory, CD4+ T-central memory, and CD4+ T memory cell types were enriched using limma-voom, unweighted \RPack{edgeR}, \RPack{MAST}, and \RPack{Seurat}, but only the CD4+ T-central memory cell type was depleted using our weighted \RPack{edgeR} method (Figure \ref{f:tenxcaseNES}c and Additional File 1: Figure \ref{f:tenxcaseNESall}). As we do not have prior knowledge about the cells in the different clusters, we are unable to say whether the cluster is more representative of the CD4+ T-effector memory cell type or if our method missed the enrichment in CD4+ naive memory T-cell type. However, it is interesting that using ZINB-WaVE to account for zero inflation in the clustering allowed \RPack{edgeR} to find results that seem \fanny{\sout{more}} biologically meaningful than without accounting for zero inflation.
+
+Finally, using a \citet{Benjamini1995} adjusted $p$-value cut-off of $0.05$, limma-voom declared $433$ and $194$ DE genes and weighted-edgeR $371$ and $151$, for clustering based on, respectively, the first $10$ PCs and $W$ from ZINB-WaVE. We additionally showed on mock comparisons for the same 10x Genomics PBMC dataset that limma-voom had a greater actual PCER than weighted \RPack{edgeR} (Figure \ref{f:fdr10x}), suggesting that some of the DE genes found by limma-voom are likely to be false positives. This belief is reinforced by the skewed distribution of limma-voom $p$-values (Additional File 1: Figure \ref{f:tenxcasePval}).
+
+\subsection*{Alternative approaches to weight estimation}
+
+ZINB-WaVE is one specific approach to fit a ZINB model for single-cell RNA-seq data. However, our proposed data analysis strategy to unlock conventional RNA-seq tools with ZINB observation-level weights is not restricted to ZINB-WaVE-based workflows. In particular, we illustrate the use of weights estimated by the \RPack{zingeR} method, an expectation-maximization (EM) algorithm which we developed earlier and that builds upon \RPack{edgeR} for estimating the NB parameters of the ZINB model \citep{VandenBerge2017a}. The \RPack{zingeR} weights differ from the ZINB-WaVE weights as they are based on a constant cell-specific excess zero probability $\pi_i$ for each cell $i$, while the ZINB-WaVE excess zero probability $\pi_{ij}$ is both cell and gene-specific, a strategy that was also advocated in recent methods \citep{Pierson2015,Finak2015}. Secondly, the ZINB-WaVE negative binomial mean $\mu$ and zero inflation probability $\pi$ are modeled in terms of both wanted and unwanted cell and gene-level covariates, allowing normalization for a variety of nuisance technical effects. Thirdly, different parameter estimation strategies are adopted: parameters from the \RPack{zingeR} model are estimated with an EM algorithm, whereas those from the ZINB-WaVE model are estimated using a penalized maximum likelihood approach. Finally, the \RPack{zingeR} method has the property that it converges to its bulk RNA-seq counterparts in the absence of zero inflation, while ZINB-WaVE may converge to a different maximum. \sd{Not immediately obvious, might want to elaborate a bit on this point.}
+
+In terms of performance, the \RPack{zingeR} workflows dominate both bulk RNA-seq and dedicated scRNA-seq methods, but they were found to be inferior in terms of sensitivity to ZINB-WaVE workflows in our simulation study on full-length protocols (Additional File 1: Figure \ref{fig:zingeRscRNASeqPerf}). However, \RPack{zingeR} seems to find a higher number of DE genes on the Usoskin dataset than ZINB-WaVE and than its bulk RNA-seq counterparts (Additional File 1: Figure \ref{fig:usoskinDEZinger}), while also controlling the FPR in mock evaluations (Additional File 1: Figure \ref{f:fdrUsoskinSupp}). However, the computational burden of the \RPack{zingeR} method prevented us to adopt it on large-scale datasets, such as those from the 10x Genomics platform or the simulation studies, limiting our comparison.
+
+%ZINB-WaVE is only one of many approaches for deriving weights and different types of weights could be appropriate in different scenarios, i.e., for different types of deviations from the NB distribution underlying most bulk RNA-seq methods. We have also considered weights estimated by the \RPack{zingeR} method, an expectation-maximization (EM) algorithm which builds upon \RPack{edgeR} for estimation of the NB parameters of the ZINB distribution \citep{VandenBerge2017a}.
+%The observation-level weights estimated using ZINB-WaVE differ from those estimated using \RPack{zingeR} in the following important respects. Firstly, while the \RPack{zingeR} model uses a constant (across all genes) probability $\pi_i$ of zero excess for each cell $i$, the probability on excess zeros $\pi_{ij}$ for ZINB-WaVE is both cell and gene-specific. The latter approach, adopted in recent methods \citep{Pierson2015,Finak2015}, is likely to result in a better fit to the data. Secondly, the ZINB-WaVE negative binomial mean $\mu$ and zero inflation probability $\pi$ are modeled in terms of both wanted and unwanted cell and gene-level covariates, allowing normalization for a variety of nuisance technical effects. Thirdly, parameters of the \RPack{zingeR} and ZINB-WaVE models are estimated using different methods: Parameters from the \RPack{zingeR} model are estimated using the EM algorithm, whereas those from the ZINB-WaVE model are estimated using a penalized maximum likelihood method. The EM-algorithm ensures that in the absence of zero inflation, \RPack{zingeR} methods will always reduce to their bulk RNA-seq counterparts, while ZINB-WaVE may convergence to a different maximum.
+%In terms of performance, the \RPack{zingeR} methods were found to be inferior to the ZINB-WaVE methods in our simulation study on full-length protocols (Additional File 1: Figure \ref{fig:zingeRscRNASeqPerf}), but seem to find a higher number of genes on the Usoskin dataset (Additional File 1: Figure \ref{fig:usoskinDEZinger}), while also controlling the FPR in mock evaluations (Additional File 1: Figure \ref{f:fdrUsoskinSupp}).
+%However, the \RPack{zingeR} method is too slow to be applied on large-scale datasets like the 10X case and simulation studies, limiting our comparisons.
+%Hence, further research would be required to provide an optimal estimation strategy for the weights.
+
+
+\subsection*{Computational time}
+
+The better performance of our ZINB-WaVE-weighted DE method comes at a computational cost, since we first need to fit ZINB-WaVE to the entire cells-by-genes matrix of read counts to compute the weights, and then use a weighted version of \RPack{DESeq2} or \RPack{edgeR} for inferring DE. To give the reader an idea of how different methods scale in terms of computation time, we benchmarked three different datasets: the Islam dataset ($92$ cells), one of the mock null Usoskin datasets used in Figure \ref{f:fdrUsoskin} ($90$ cells), and the CD4+ T-cell cluster of the 10x Genomics PBMC dataset ($1,151$ cells). For each dataset, $10,000$ genes were sampled at random and the two cell types were used as covariates. For the Usoskin dataset, batch was added as a covariate for all methods. For all datasets, the fastest method was limma-voom followed by \RPack{edgeR} (Additional File 1: Figure \ref{f:timebenchmark}). As \RPack{DESeq2} was slower than \RPack{edgeR}, not surprisingly weighted-DESeq2 was also slower than weighted-edgeR, especially for the 10x Genomics PBMC dataset.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Discussion                   %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 \section*{Discussion}
 
-\fanny{Add time computation times to benchmark the different methods.\\}
-We used default bulk RNA-seq normalization procedures and adopted positive counts normalization for DESeq2 \cite{McMurdie2013}, which has been shown to boost its performance.
-Novel normalization procedures have been developed for scRNA-seq data analysis (e.g. scran \cite{Lun2016a}), but a thorough comparison of normalization methods falls outside the scope of this contribution.
-The zingeR implementation, however, allows the user to supply custom normalization factors, which opens the zingeR data analysis workflow towards any normalization method that produces normalization factors or offsets.\\
-In all simulations, we have used the zingeR count component for inference, using either edgeR or DESeq2.
-However, zingeR's posterior probabilities can also be used to unlock  other standard RNA-seq workflows in zero-inflation situations. 
-Additional File 1: Figure S13 shows that zingeR observation weights also boost performance of limma-voom in an scRNA-seq context, where we combine heteroscedastic weights with the posterior probabilities.
-Similar to the default limma-voom method, the zingeR\_limma-voom implementation suffers from a liberal FDR control.\\
-Our simulations complement the findings of Jaakkola et al. (2016) \cite{Jaakkola2016} and Soneson \& Robinson (2017) \cite{Soneson2017}, but additionally suggest that the performance of dedicated scRNA-seq methods depends on the degree of zero-inflation.
-Although MAST, metagenomeSeq and scde were explicitly developed to address excess zeros, they suffer from poor performance in a high zero-inflation setting, as is demonstrated in the Islam simulation study.\\
-The method was demonstrated on scRNA-seq protocols relying on standard read counting. Recently, unique molecular identifiers (UMI) have been proposed to reduce the measurement variability across samples \cite{Islam2013}. In UMI-based protocols, transcripts are labeled with a small random UMI barcode prior to amplification. After amplification and sequencing, one then counts the number of unique UMIs found for every transcript, which then corresponds to the number of sequenced UMI-labeled transcripts.
-It has previously been shown \cite{Grun2014} that UMI-tagged data follow a negative binomial distribution.
-Hence, the zingeR methods will also provide good results for UMI-based data as they have the desirable property to converge towards a regular edgeR (DESeq2) analysis in the absence of zero-inflation. The latter is an important property and demonstrates zingeR's broad applicability.
+This manuscript focused on adapting standard bulk RNA-seq differential expression tools to handle the severe zero inflation present in single-cell RNA-seq data. We proposed a simple and general approach that integrates seamlessly with a range of popular DE software packages, such as \RPack{edgeR} and \RPack{DESeq2}. The main idea is to use weights for zero inflation in the negative binomial model underlying bulk RNA-seq methods, where the weights are based on the ZINB-WaVE method of \citet{Risso2017}. The general and flexible ZINB-WaVE framework allows to extract low-dimensional signal from scRNA-seq read counts, accounting for zero inflation (e.g., dropouts), over-dispersion, and the discrete nature of the data. In particular, the ZINB-WaVE model allows for read count normalization through an appropriate parameterization of the negative binomial means and zero inflation probabilities in terms of both gene and cell-level covariates. 
 
+Our results complement the findings of \citet{Jaakkola2016} and \citet{Soneson2017}, that bespoke scRNA-seq tools do not systematically improve upon bulk RNA-seq tools. Although \RPack{MAST}, \RPack{metagenomeSeq}, and \RPack{SCDE} were explicitly developed to handle excess zeros, they suffer from poor performance in a high zero inflation setting, as demonstrated in the simulation study. 
+
+The value of our method was demonstrated for scRNA-seq protocols relying on both standard (Islam, Usoskin, and Trapnell datasets) and unique molecular identifier (UMI) (10x Genomics PBMC dataset) read counting. UMIs were recently proposed to reduce measurement variability across samples \citep{Islam2013}. In UMI-based protocols, transcripts are labeled with a small random UMI barcode prior to amplification. After amplification and sequencing, one enumerates the unique UMIs found for every transcript, which correspond to individual sequenced UMI-labeled transcripts. It has previously been shown \citep{Grun2014} that UMI read counts follow a negative binomial distribution. Hence, not surprisingly, our method also provides good results for UMI-based data. It also has the desirable property to converge towards a standard unweighted DE analysis (e.g., unweighted \RPack{edgeR} or \RPack{DESeq2}) in the absence of zero inflation. The latter is an important property that demonstrates our method's broad applicability.
+
+In the simulation study, power to detect DE was generally lower for 10x Genomics UMI datasets (Figure \ref{fig:scRNASeq10xPerf}) than for full-length protocol datasets (Figure \ref{fig:scRNASeqPerf}).
+While the 10x Genomics platform has the advantage of an extremely high throughput, allowing many cells to be characterized, the resulting datasets often have the disadvantage of low library sizes, a logical consequence of UMI counting and of the trade-off between sequencing depth and number of cells to be sequenced in one sequencing run. As a result, the sequencing depth of these datasets is much lower than that of bulk RNA-seq datasets, making it harder to identify excess zeros and assess differential expression, even in large sample size settings.
+%Note, that the relative uncertainty (coefficient of variation) on low counts is higher than for high counts, making it harder to assess differential expression on 10x platforms, even in large sample size settings.
+Although the 10x Genomics platform may be well suited for hypothesis generation, e.g., through cell type discovery or lineage trajectory studies, full-length protocols may be more appropriate for discovering marker genes between inferred cell types or trajectories, an approach that has also been adopted in previous studies \citep{Pal2017}.
+%This makes that the sequencing depth of these datasets much lower as compared to typical sequencing depths observed in bulk RNA-seq methods, which makes it harder to identify excess zeros and assess differential expression, even in large sample size settings.
+%Note, that the relative uncertainty (coefficient of variation) on low counts is higher than for high counts, making it harder to assess differential expression on 10x platforms, even in large sample size settings.
+%While the 10x platform may be well suited for hypothesis generation, e.g. through cell type discovery or lineage trajectory studies, full-length protocols may be more optimal for discovering marker genes between discovered cell types or trajectories, an approach that has also been adopted by previous studies (e.g. \citep{Pal2017}).
+
+We have used ZINB-WaVE in conjunction with either \RPack{edgeR} or \RPack{DESeq2}. However, the ZINB-WaVE posterior probabilities could be used as weights to unlock other standard RNA-seq workflows in zero inflation situations. Additional File 1: Figure \ref{fig:suppScRNASeqPerf} shows that ZINB-WaVE weights combined with heteroscedastic weights in limma-voom also increase power in a scRNA-seq context, although this may be at the expense of Type I error control. 
+
+The ZINB-WaVE model penalizes the L2 norm of the parameter estimates for regularization purposes. It requires a penalty parameter, $\epsilon$, that is rescaled differently for gene-specific parameters, cell-specific parameters, and dispersion parameters \citep{Risso2017}. All analyses in this manuscript were performed with $\epsilon=10^{12}$, to provide consistently comparable results. However, the optimal value of $\epsilon$ is dataset-specific and further research is needed to provide a data-driven approach for selecting an optimal $\epsilon$. Indeed, based on our simulations, the value of the penalty parameter can have a profound influence on results (Additional File 1: Figure \ref{fig:islamEpsEval}), but we found $\epsilon= 10^{12}$ to have generally good performance. 
+ZINB-WaVE allows the option to infer latent variables $W$, which may correspond to either unmeasured confounding covariates or unmeasured covariates of interest. The observational weights were computed with the number of unknown covariates $K=0$, i.e., no latent variables were inferred. For clustering of the real datasets, we inferred an optimal choice of $K$ using the AIC (Additional File 1: Figure \ref{f:tenxcaseAICBIC}). However, further investigation is needed to confirm that the AIC is appropriate for selecting $K$.
+
+Our proposed ZINB-WaVE model could also be used, in principle, to identify DE genes, both in terms of the negative binomial mean and the zero inflation probability, reflecting, respectively, a continuum in DE and a more binary (i.e., presence/absence) DE pattern. In this context, the parameters of interest are regression coefficients $\beta$ corresponding to known sample-level covariates in the matrix $X$ used in either $\mu$ or $\pi$ (Equation \eqref{e:zinbwave}). Differentially expressed genes may be identified via likelihood ratio tests or Wald tests, with the standard errors of estimators of $\beta$ obtained from the inverse of the Hessian matrix of the likelihood function. However, both types of tests would be computationally costly, as likelihood ratio tests would require refitting the entire model for each gene and Wald tests would require the Hessian matrix to be computed and inverted. 
+
+%ZINB-WaVE is only one of many approaches for deriving weights and different types of weights could be appropriate in different scenarios, i.e., for different types of deviations from the NB distribution underlying most bulk RNA-seq methods. We have also considered weights estimated by the zingeR method, an expectation-maximization (EM) algorithm which builds upon edgeR for estimation of the NB parameters of the ZINB distribution \citep{VandenBerge2017a}. However, we found the ZINB-WaVE weights to perform better across a broad range of simulation scenarios and real datasets. The observation-level weights estimated using ZINB-WaVE differ from those estimated using zingeR in the following important respects. Firstly, while the zingeR model uses a constant (across all genes) probability $\pi_i$ of zero excess for each cell $i$, the probability on excess zeros $\pi_{ij}$ for ZINB-WaVE is both cell and gene-specific. The latter approach, adopted in recent methods \citep{Pierson2015,Finak2015}, is likely to result in a better fit to the data. Secondly, the ZINB-WaVE negative binomial mean $\mu$ and zero inflation probability $\pi$ are modeled in terms of both wanted and unwanted cell and gene-level covariates, allowing normalization for a variety of nuisance technical effects. Thirdly, parameters of the zingeR and ZINB-WaVE models are estimated using different methods: Parameters from the zingeR model are estimated using the EM algorithm, whereas those from the ZINB-WaVE model are estimated using a penalized maximum likelihood method. \\
+
+In this contribution, we have proposed to estimate the weights using ZINB-WaVE, but other approaches are possible. It is important to note that while methods such as ZINB-WaVE and \RPack{zingeR} can successfully identify excess zeros, they cannot however readily discriminate between their underlying causes, i.e., between technical (e.g., dropout) and biological (e.g., bursting) zeros. Although we cannot make this distinction with the weights, an increase in bursting rates between cell types, characterized by higher counts and more zeros \citep{Fujita2016}, can however be picked up by the count component of the ZINB.
+
+%\koen{Now rephrased.} \fanny{Move this paragraph to the response to the reviewers.}
+%We envision the use case for our method as the inference of differential expression between homogeneous cell types. If the researcher is confronted with a dataset consisting of heterogeneous groups of cells, we recommend an initial clustering step to define homogeneous groups to be subsequently examined for DE.
+%Note that performing both clustering and DE on the same dataset could lead to smaller DE $p$-values and possible anti-conservative behavior \koen{REF?}\fanny{No common reference}.
+%However, we view $p$-values primarily as summary statistics for ranking genes in terms of DE and the ranking should not change. The approach can thus be considered valid for the identification of marker genes to be further investigated.
+
+%The focus of this manuscript is differential expression analysis between cell types.
+%If the interest of the researcher is to assess differential expression between heterogeneous groups of cells, the method may be less favorable.
+%Indeed, zeros from a marker gene that is only expressed in a specific cell type and not in others would be downweighted if a mixture population of cell types were to be considered as a group of interest in a differential expression analysis.
+%In such a scenario, researchers could instead look for broader definitions of differences in expression, like testing for differential distributions between groups \citep{Korthauer2016}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Conclusions                   %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section*{Conclusions}
-\fanny{add 10x-genomics}\\
-In summary, we provide a realistic simulation framework for single cell RNA-seq data and 
-introduce a novel tool zingeR that successfully identifies excess zeros related to dropout events in scRNA-seq experiments. 
-We confirmed that state of the art scRNA-seq tools do not improve upon common RNA-seq tools for differential expression analysis of single cell RNA-seq experiments. 
-The zingeR workflows, however, outperform current methods and have the merit to converge to conventional RNA-seq analyses in the absence of zero-inflation. 
-Standard inference is provided by the count component of the ZINB model and our tool produces posterior probabilities that can be used as observation-level weights by conventional RNA-seq tools.
-Hence, zingeR has the promise to unlock traditional RNA-seq DE workflows for zero-inflated data and will assist researchers, data analysts and developers to improve the power to detect DE in the presence of excess zeros. 
+
+In summary, we provide a realistic simulation framework for single-cell RNA-seq data and use the well-tested ZINB-WaVE method to successfully identify excess zeros and yield gene and cell-specific weights for differential expression analysis in scRNA-seq experiments. The tools we have developed allow an integrated workflow for normalization, dimensionality reduction, cell type discovery, and the identification of cell type marker genes. We confirmed that state-of-the-art scRNA-seq tools do not improve upon common bulk RNA-seq tools for differential expression analysis based on scRNA-seq data. Our workflow, however, outperforms current methods and has the merit to reduce to conventional bulk RNA-seq analyses in the absence of zero inflation. Inference of DE is focused on the count component of the ZINB model and our method produces posterior probabilities that can be used as observation-level weights by bulk RNA-seq tools. Hence, our approach unlocks widely-used bulk RNA-seq DE workflows for zero-inflated data and will assist researchers, data analysts, and developers in improving power to detect DE in the presence of excess zeros. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Methods                   %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section*{Methods}
-\subsection*{The zero-inflated negative binomial model (ZINB)}
 
-\fanny{No emphasis on the NB model, focus on the ZINB model}\\
+\subsection*{ZINB-WaVE: Zero-inflated negative binomial-based wanted variation extraction}
 
-====== start of nb section\\
+\paragraph{Zero-inflated distributions.}
 
-Let $Y_{gi}$ be the read counts for gene $g$ in sample $i$.
-Many RNA-seq differential expression (DE) analysis tools \cite{Love2014, Anders2010, McCarthy2012} assume the read counts to follow a negative binomial (NB) distribution
-\[ y_{gi} \sim \text{NB}(\mu_{gi},\phi_g), \]
-with $\mu_{gi}$ the expected count in sample $i$ and $\phi_g$ the NB dispersion parameter.
-We adopt the negative binomial parametrization $Y \sim \text{NB}(\mu,\phi)$, then $E(Y)=\mu$ and Var$(Y)= \mu + \phi\mu^2$.
-Due to the low sample size in common RNA-seq experiments dispersion estimates as estimated with standard maximum likelihood theory are often unreliable and empirical Bayes methods \cite{Smyth2004,Efron2010} are used to borrow information across genes.
-The negative binomial distribution is then embedded in a generalized linear model (GLM) with a log-link to model the mean $\mu_{gi}$  of experiments with complex designs, i.e.
-\[\log{\mu_{gi}}= \mathbf{X}_i\boldsymbol{\beta}+\log N_i,\]
-with $\mathbf{X}_i$ the covariates for observation $i$, $\boldsymbol{\beta}$ the model parameters of the linear predictor, and  $\log N_i$ an offset used for normalization, e.g., to correct for differences in sequencing depth and composition\cite{Robinson2010}. 
+A major difference between single-cell and bulk RNA-seq data is arguably the high abundance of zero counts in the former. Traditionally, excess zeros are dealt with by the use of hurdle or zero-inflated models, as recently proposed by \citet{Finak2015}, \citet{Kharchenko2014}, and \citet{Paulson2013}. A zero-inflated count distribution is a two-component mixture distribution between a point mass at zero and a count distribution, in our case, the negative binomial distribution which has been used successfully for bulk RNA-seq \citep{Love2014,Robinson2010a,Law2014,McCarthy2012a}. 
 
-=== end of NB section\\
-
-The major difference between scRNA-seq and bulk RNA-seq experiments is arguably the high abundance of zeros in scRNA-seq datasets. 
-%An appropriate way of dealing with excess zeros is
-Traditionally, excess zeros are dealt with by the use of hurdle models or zero-inflated distributions, as recently proposed by Finak et al. (2015) \cite{Finak2015}, Kharchenko et al. (2014) \cite{Kharchenko2014} and Paulson et al. (2013) \cite{Paulson2013}. 
-A zero-inflated count distribution $f_{ZI}$ is a two component mixture distribution between a point mass at zero $\delta$ and a count distribution $f_{count}$, in our case the negative binomial distribution $f_{NB}$:
-
-\[ f_{ZI}(y_{gi}; \mu_{gi}, \phi_g, \pi_i) = \pi_i\delta + (1-\pi_i)f_{NB}(\mu_{gi},\phi_g) \]
-
-with $\pi_i$ the mixture parameter indicating the probability for a count to be an excess zero in sample $i$.
-The model parameters $\left\{\mu_{gi}, \phi_g, \pi_i\right\}$ can be estimated with maximum likelihood.
-However, no closed form solutions exist and we develop an expectation maximization (EM) algorithm for high throughput data.
-Note, that the ZINB model provides posterior probabilities that a count $y_{gi}$ belongs to the count component given the observed $\mb{X}_i$ and $N_i$, which play a central role in our EM algorithm and can be used as observation weights in regular RNA-seq workflows. Let $Z_{gi}$ be an indicator variable, where $z_{gi}=1$ if $y_{gi}$ belongs the zero-inflation component and $z_{gi}=0$ if $y_{gi}$ originates from the count component, then the posterior probabilities are given by
-
-\[  w_{gi} = P(z_{gi}=0 | \mb{X}_i, N_i) =\frac{(1-\pi_i)f_{NB}(\mu_{gi},\phi_g)}{f_{ZI}(y_{gi}; \mu_{gi}, \phi_g, \pi_i)}.\]
-
-\subsection*{ZINB-WaVE model}
-
-\fanny{Section added on ZINB-WaVE. No details but point to ZINB-WaVE paper.}\\
-
-{\color{blue} For any \(\pi\in[0,1]\), let \(f_{ZINB}( \cdot;\mu,\theta, \pi)\) be the probability mass function (PMF) of the zero-inflated negative binomial (ZINB) distribution given by:
+The probability mass function (PMF) $f_{ZINB}$ for the zero-inflated negative binomial (ZINB) distribution is given by
 \begin{equation}
+\label{e:zinb0}
 f_{ZINB}(y;\mu,\theta, \pi) = \pi \delta_0(y) + (1-\pi) f_{NB}(y;\mu,\theta), \quad \forall y\in\mathbb{N},
 \end{equation} 
-where 
-$f_{NB}(y;\mu,\theta)$ denotes the negative binomial (NB) PMF with mean $\mu$ and dispersion $\theta$ and \(\delta_0(\cdot)\) denotes the Dirac function. Here, \(\pi\) can be
-interpreted as the probability of a droupout, i.e., that a zero is observed instead of the
-actual count, resulting in an inflation of zeros compared to the NB distribution. 
+where $\pi \in [0,1]$ denotes the mixture probability for zero inflation, $f_{NB}(\cdot ;\mu,\theta)$ the negative binomial (NB) PMF with mean $\mu$ and dispersion $\theta = 1/\phi$, and $\delta_0(\cdot)$ the Dirac function ($\delta_0(y)= +\infty$ when $y=0$ and $0$ otherwise and $\delta_0$ integrates to one over $\mathbb{R}$, i.e., has cumulative distribution function equal to $I(y \geq 0)$). Here, $\pi$ can be interpreted as the probability of an excess zero, i.e., inflated zero counts, with respect to the NB distribution.
+% dropout \lc{excess zero? we also biological excess zeros}, i.e., an undetected but expressed gene, resulting in an inflation of zero counts compared to the NB distribution. 
 
-Given \(n\) samples (typically, \(n\) single cells) and \(J\) features
-(typically, \(J\) genes) that can be counted for each sample, let
-\(Y_{ij}\) denote the count of feature \(j\) (for \(j=1,\ldots,J\)) for
-sample \(i\) (\(i=1,\ldots,n\)). To account for various technical and
+Under a ZINB model, the posterior probability that a given count $y$ arises from the NB count component is given by Bayes' rule 
+$$w = \frac{ ( 1 - \pi) f_{NB}(y; \mu, \theta ) }{f_{ZINB}(y;\mu, \theta, \pi)}.$$
+As described below, such posterior probabilities can be used as weights in standard bulk RNA-seq workflows, for a suitable parameterization of the ZI probability and NB mean. 
+
+\paragraph{ZINB-WaVE model.}
+
+Given $n$ observations (typically, $n$ single cells) and $J$ features
+(typically, $J$ genes) that can be counted for each observation, let
+$Y_{ij}$ denote the count of feature $j$ (for $j=1,\ldots,J$) for
+observation $i$ ($i=1,\ldots,n$). To account for various technical and
 biological effects frequent in single-cell sequencing
-technologies, we model \(Y_{ij}\) as a random variable following a ZINB
-distribution with parameters \(\mu_{ij}\), \(\theta_{ij}\), and
-\(\pi_{ij}\), and consider the following regression models for these parameters:
-\begin{align}
-\label{eq:model1}
-\ln(\mu_{ij}) &= \left( X\beta_\mu + (V\gamma_\mu)^\top + W\alpha_\mu + O_\mu\right)_{ij}\,,\\
-\label{eq:model2}
-\text{logit}(\pi_{ij}) &= \left(X\beta_\pi + (V\gamma_\pi)^\top + W\alpha_\pi + O_\pi\right)_{ij} \,, \\
-\label{eq:model3}
-\ln(\theta_{ij}) &= \zeta_j \,.
-\end{align}
+technologies, we model $Y_{ij}$ as a random variable following a ZINB distribution with parameters $\mu_{ij}$, $\theta_{ij}$, and $\pi_{ij}$, and consider the following regression models for these parameters:
+\begin{eqnarray}
+\label{e:zinbwave}
+\ln(\mu_{ij}) &=& \left( X\beta_\mu + (V\gamma_\mu)^\top + W\alpha_\mu + O_\mu\right)_{ij}\,,\\
+\text{logit}(\pi_{ij}) &=& \left(X\beta_\pi + (V\gamma_\pi)^\top + W\alpha_\pi + O_\pi\right)_{ij} \,, 
+\nonumber\\		
+\ln(\theta_{ij}) &=& \zeta_j \,. \nonumber
+\end{eqnarray}
 
-Both the mean expression level ($\mu$) and the probability of dropouts ($\pi$) are modeled in terms of \textit{observed} sample-level and gene-level covariates ($X$ and $V$, respectively). In addition, we include a set of \textit{unobserved} sample-level covariates ($W$) that need to be inferred from the data. The matrix $X$ can include covariates that induce variation of interest, such as cell types, or covariates that induce unwanted variation, such as batch or quality control (QC) measures. It can also include a constant column of ones for an intercept that accounts for gene-specific differences in mean expression level or dropout rate. The matrix $V$ can also accommodate an intercept to account for cell-specific global effects, such as size factors representing differences in library sizes (i.e., total number of reads per sample). In addition, $V$ can include gene-level covariates, such as gene length or GC-content.\\ 
+Both the NB mean expression level $\mu$ and the ZI probability $\pi$ are modeled in terms of \textit{observed sample-level and gene-level covariates} ($X$ and $V$, respectively), as well as \textit{unobserved sample-level covariates} ($W$) that need to be inferred from the data. $O_\mu$ and $O_\pi$ are known matrices of offsets. The matrix $X$ can include covariates that induce variation of interest, such as cell types, or covariates that induce unwanted variation, such as batch or quality control (QC) measures. It can also include a constant column of ones for an intercept that accounts for gene-specific global differences in mean expression level or dropout rate. The matrix $V$ can include gene-level covariates, such as length or GC-content. It can also accommodate an intercept to account for cell-specific global effects, such as size factors representing differences in library sizes (i.e., total number of reads per sample). The unobserved matrix $W$ contains unknown sample-level covariates, which could correspond to unwanted variation as in RUV \citep{Gagnon-Bartsch2012, Risso2014NormalizationSamples} (e.g., \textit{a priori} unknown batch effects) or could be of interest as in cluster analysis (e.g., \textit{a priori} unknown cell types). The model extends the RUV framework to the ZINB distribution (thus far, RUV had only been implemented for linear \citep{Gagnon-Bartsch2012} and log-linear regression \citep{Risso2014NormalizationSamples}). It differs, however, in interpretation from RUV in the $W\alpha$ term, which is not necessarily considered unwanted and generally refers to unknown low-dimensional variation. It is important to note that although $W$ is the same, the matrices $X$ and $V$ could differ in the modeling of $\mu$ and $\pi$, if we assume that some known factors do not affect both. 
 
-The model is fit using a penalized likelihood method. See \cite{Risso2017} for more details on the model and parameter estimation.}
+As detailed in \citet{Risso2017}, the model is fit using a penalized maximum likelihood estimation procedure.
 
-\subsection*{Inference}
-We only consider statistical inference on the count component of the mixture distribution.
-For zingeR\_edgeR, we refit the models with the posterior probabilities of the converged algorithm and adopt approximate empirical Bayes shrinkage of the dispersion. 
-Downweighting is accounted for in the statistical test by adjusting the degrees of freedom of the null distribution accordingly.
-More specifically, we reintroduce the moderated F-test in the edgeR package where the denominator residual degrees of freedom for a particular gene are adjusted by the extent of zero-inflation that was identified for this gene, i.e. $df_g=\sum_{i=1}^N w_{gi} - p$ where $df_g$ are the degrees of freedom for gene $g$, $w_{gi}$ the posterior probabilities for gene $g$ in sample $i$ and $p$ the number of model parameters estimated in the NB GLM.\\
-We also extended the DESeq2 package to accommodate for zero-inflation by providing the option to use observation-level weights in the parameter estimation steps. DESeq2's default normalization procedure requires geometric means of counts, which are zero for genes with at least one zero count. This limits the number of genes that can be used for  normalization in scRNA-seq applications. We therefore implemented the normalization method suggested in the phyloseq package \cite{McMurdie2013}, which calculates geometric means for a gene by only using its positive counts, so genes with zero counts could still be used for normalization purposes. The phyloseq normalization procedure can now be adopted by specifying the type \texttt{poscounts} in the DESeq2 \texttt{estimateSizeFactors} function.
-To account for downweighting of excess zeros, we replace the Gaussian null distribution of the Wald test by a t-distribution with  adjusted degrees of freedom as in the zingeR\_edgeR analysis.\\
-For limma-voom, heteroscedastic weights are estimated based on the mean-variance trend of the log-transformed counts with the \texttt{voom} method. 
-The heteroscedastic weights are then multiplied with the zero-inflation weights, which are then used in a weighted linear model fit.
-To account for downweighting, the residual degrees of freedom of the linear model fit are adjusted before the empirical Bayes variance shrinkage and are therefore also propagated to the residual degrees of freedom from the moderated statistical tests.\\
-For the zero-inflated methods, we use the independent filtering procedure that was developed in the genefilter package and used in DESeq2 \cite{Love2014} to improve performance where possible \cite{Bourgon2010}.
-Similar to DESeq2, we use the average expression strength (or the average fitted values) of each gene as its filter criterion and all genes with normalized mean below a filtering threshold are discarded for the multiple testing adjustment.
-By default, a threshold is chosen that maximizes the number of differentially expressed features.
+\subsection*{Using ZINB-WaVE weights in DE inference methods}
+
+We only consider statistical inference on the count component of the mixture distribution, that is, we are concerned with identifying genes whose expression levels are associated with covariates of interest as parameterized in the mean $\mu$ of the negative binomial component. Most popular bulk RNA-seq methods are based on the methodology of generalized linear models (GLM), which readily accommodates inference based on observation-level weights (R function \RObj{glm}), e.g., negative binomial model in Bioconductor R packages \RPack{edgeR} and \RPack{DESeq2}. Note that although the ZINB-WaVE weights are gene and cell-specific, the GLMs are fit gene by gene; hence, for given gene, the cell-specific weights are used as observation-specific weights in the GLMs. 
+
+\paragraph{edgeR.} 
+We extended the \RPack{edgeR} package \citep{Robinson2010a,McCarthy2012a} by fitting a negative binomial model genewise, with ZINB-WaVE posterior probabilities as observation-level weights in the \RObj{weights} slot of an object of class \RClass{DGEList}, and estimating the dispersion parameter by the usual approximate empirical Bayes shrinkage. Downweighting is accounted for by adjusting the degrees of freedom of the null distribution of the test statistic. Specifically, we reintroduced the moderated $F$-test from a previous version of \RPack{edgeR}, where the denominator residual degrees of freedom $df_j$ for a particular gene $j$ are adjusted by the extent of zero inflation identified for this gene, i.e., $df_j=\sum_i w_{ij} - p$, where $w_{ij}$ is the ZINB-WaVE weight for gene $j$ in cell $i$ and $p$ the number of parameters estimated in the NB generalized linear model. This weighted $F$-test is implemented in the function \RObj{glmWeightedF} from the Bioconductor R package \RPack{zinbwave}.
+
+\paragraph{DESeq2.}
+We extended the \RPack{DESeq2} package \citep{Love2014} to accommodate zero inflation by providing the option to use observation-level weights in the parameter estimation steps. In this case, the ZINB-WaVE weights are supplied in the \RObj{weight} slot of an object of class \RClass{DESeqDataSet}.
+
+\RPack{DESeq2}'s default normalization procedure is based on geometric means of counts, which are zero for genes with at least one zero count. This greatly limits the number of genes that can be used for normalization in scRNA-seq applications \citep{Vallejos2017NormalizingOpportunities}. We therefore use the normalization method suggested in the \RPack{phyloseq} package \citep{McMurdie2013}, which calculates the geometric mean for a gene by only using its positive counts, so that genes with zero counts could still be used for normalization purposes. The \RPack{phyloseq} normalization procedure can now be applied by setting the argument \RObj{type} equal to \RObj{poscounts} in the \RPack{DESeq2} function \RObj{estimateSizeFactors}. For single cell UMI data, when the expected counts may be very low, the likelihood ratio test implemented in \RCmd{nbinomLRT} should be used. In other protocols (i.e. non-UMI), the Wald test in \RCmd{nbinomWaldTest} can be used, where the t distribution with degrees of freedom corrected for down-weighting serves as the null distribution for the Wald statistic. For both cases, we recommend the minimum expected count to be set to a small value (\RCmd{minmu=1e-6}). The Wald test in \RPack{DESeq2} allows for testing contrasts of the coefficients.
+
+\paragraph{limma-voom.}
+For the limma-voom approach \citep{Law2014}, implemented in the \RObj{voom} function from the \RPack{limma} package, heteroscedastic weights are estimated based on the mean-variance relationship of the log-transformed counts. We adapt limma-voom to zero-inflated situations by multiplying the heteroscedastic weights by the ZINB-WaVE weights and using the resulting weights in weighted linear regression. To account for the downweighting of zeros, the residual degrees of freedom of the linear model are adjusted as with \RPack{edgeR} before the empirical Bayes variance shrinkage and are therefore also propagated to the residual degrees of freedom from the moderated statistical tests. 
+Both the standard and ZINB-WaVE-weighted versions of limma-voom were considered in the simulation study; the latter was not considered for the real datasets, due to its poor performance in the simulation study. 
+
+\paragraph{Multiple testing.} 
+For the simulation study, in order to reduce the number of tests performed \citep{Bourgon2010}, we applied the independent filtering procedure implemented in the \RPack{genefilter} package and used in \RPack{DESeq2} \citep{Love2014}. As in \RPack{DESeq2}, we excluded from the multiple testing correction any gene whose average expression strength (i.e., average of fitted values) was below a threshold chosen to maximize the number of differentially expressed genes. 
+
+Unless specified otherwise, the $p$-values for all methods were then adjusted using the \citet{Benjamini1995} procedure for controlling the false discovery rate (FDR). 
+
+
+\paragraph{Performance} 
+We assessed performance based on scatterplots of the true positive rate (TPR) vs. the false discovery proportion (FDP), as well as receiver operating characteristic (ROC) curves of the true positive rate (TPR) vs. the false positive rate (FPR), according to the following definitions
+\begin{eqnarray*}
+FDP &=& \frac{FP}{\max(1,FP + TP)}\\
+FPR &=& \frac{FP}{FP + TN}\\
+TPR &=& \frac{TP}{TP + FN},\\
+\end{eqnarray*}
+where $FN$, $FP$, $TN$, and $TP$ denote, respectively, the numbers of false negative, false positives, true negatives, and true positives. FDP-TPR curves and ROC curves are implemented in the Bioconductor R package \RPack{iCOBRA} \citep{Soneson2016b}.
+
+\paragraph{DE method comparison.}
+We compared our weighted DE approach to state-of-the-art bulk RNA-seq methods implemented in the packages \RPack{edgeR} (v3.20.1) \citep{Robinson2010a,McCarthy2012a}, \RPack{DESeq2} (v1.19.8) \citep{Love2014}, and \RPack{limma} (v3.34.0) \citep{Law2014}. We also considered dedicated scRNA-seq tools from the packages \RPack{scde} (v2.6.0) \citep{Kharchenko2014}, \RPack{MAST} (v1.4.0) \citep{Finak2015}, and \RPack{NODES} (v0.0.0.9010) \citep{Sengupta2016}, as well as \RPack{metagenomeSeq} (v1.18.0) \citep{Paulson2013} developed to account for zero inflation in metagenomics applications. A ZINB model is also implemented in \RPack{ShrinkBayes} \citep{VandeWiel2014}, but the method does not scale to the typical sample sizes encountered in scRNA-seq and has many tuning parameters, which lead us to not include it in our comparison. In \RPack{DESeq2}, we disable the outlier imputation step and allow for shrinkage of fold-changes by default. In addition, for large $3'$ datasets like the Usoskin and 10x PBMC datasets, we set the minimum expected count estimated by the \RPack{DESeq2} model to $10^{-6}$, allowing the model to cope with large sample sizes and low counts. We use the recommended gene filtering procedures for \RPack{NODES} and \RPack{MAST}, except for computing time benchmarking where no genes are filtered out to allow a fair comparison. For all other methods, arguments were set to their default values. 
+% * <michaelisaiahlove@gmail.com> 2017-12-07T20:37:16.999Z:
+% 
+% > allowing
+% I edited this from 1e-3 to 10^{-6}, correct?
+% 
+% ^.
+% * <michaelisaiahlove@gmail.com> 2017-12-07T20:36:00.596Z:
+% 
+% > 10^{-6}
+% I edited this from 1e-3 to 10^{-6}, correct?
+% 
+% ^ <michaelisaiahlove@gmail.com> 2017-12-07T20:36:43.147Z.
 
 \subsection*{scRNA-seq data simulation}
 
-\fanny{Replace by Koen's new simulation framework.}\\
-We extend the framework from Zhou et al. (2014) \cite{Zhou2014} towards scRNA-seq applications and provide user-friendly software to simulate scRNA-seq data as part of the zingeR R package.
-The user can input a real scRNA-seq dataset to extract feature-level parameters for generating scRNA-seq counts.
-Library sizes for the simulated samples are by default resampled from the real dataset but they can also be specified.
-The simulation framework models positive and zero counts separately using a hurdle model.
-For the positive counts, expression fractions $\hat \lambda_g = \frac{1}{|\{ y_{gi} > 0\}|} \sum_{i \in \{ y_{gi} > 0\}} y_{gi}/N_i$ are empirically estimated and dispersions $\phi_g$ are estimated according to a zero-truncated negative binomial (ZTNB) distribution.
-The zero abundance $p_{gi}$ of a gene $g$ is modelled as a function of an interaction between its expression intensity (in terms of average log counts per million $A_g$) and the sequencing depth of the sample $i$ using a semiparametric additive logistic regression model, motivated by dataset-specific associations observed in real scRNA-seq datasets (Additional File 1: Figures S3, S5).
-The simulation paradigm jointly samples the gene-wise estimated parameters $\{\hat \lambda_{g}, \hat \phi_g, A_g, p_{gi}\}$ to retain gene specific characteristics present in the original dataset.
-We use the expected probability on zero counts $p_g = \frac{\sum_{i}^n p_{gi}}{n}$ to introduce zero counts by simulating from a binomial process. 
-Positive counts are then simulated according to a ZTNB distribution with mean $\hat \mu_{gi} = \hat \lambda_{gi} N_i^s$ and dispersion $\hat \phi_g$, with $N_i^s$ the simulated library size for sample $i$.
-The framework acknowledges both gene-specific characteristics as well as broad dataset-specific associations across all genes and  provides realistic scRNA-seq data for method evaluation.\\
+We extended the framework of \citet{Zhou2014} towards scRNA-seq applications and provide user-friendly R code to simulate scRNA-seq read counts in the GitHub repository linked to this manuscript at \url{https://github.com/statOmics/zinbwaveZinger}.
+The user can input a real scRNA-seq dataset to infer gene-level parameters for the read count distributions. Library sizes for the simulated samples are by default resampled from the real dataset, but can also be user-specified. The simulation paradigm randomly resamples parameters estimated from the original dataset, where all parameters of a given gene are resampled jointly in order to retain gene-specific characteristics present in the original dataset.
 
-We evaluate performance based on both the Islam \cite{Islam2011} and a subset of the Trapnell \cite{Trapnell2013} dataset. The count table from the Islam dataset was downloaded from the Gene Expression Omnibus with accession number GSE29087. The Islam dataset considers $44$ embryonic fibroblasts and $48$ embryonic stem cells in mouse. Negative control wells are removed and $11,796$ genes with at least five positive counts are retained for analysis. For the simulation, we replicate a dataset with two groups of $40$ samples. The Trapnell dataset is downloaded from the preprocessed single-cell data repository conquer (\url{http://imlspenticton.uzh.ch:3838/conquer}) \cite{Soneson2017}. We only use a subset of the Trapnell dataset from the 48h and 72h timepoints of differentiating human myoblasts to generate a two-group comparison. Wells that do not contain one cell or that contain debris were removed from the dataset. We use a more stringent filtering criterion for the larger Trapnell dataset and retained $24,576$ genes with at least $10$ positive counts. The simulated dataset contains two conditions with $75$ samples in each condition, thereby replicating the sample size of the Trapnell dataset.
+%counts
+%\koen{Thanks for discussion. $A_j$ may be considered as a function of parameter $\lambda_j$, i.e. $A_j = f(\lambda_j) = \log_2 (\lambda_j 1e6)$, which does not make it a random variable. However, you are right since the way we are estimating with \RObj{edgeR::aveLogCPM} it does look more like a random variable. We could indeed use $\hat{A}_j =\log_2 (\hat{\lambda}_j 1e6)$ in the simulations, and I would be happy to try. That way, $\hat \lambda_j$ is used for estimating both $\hat \mu_{ij}$ and $A_j$. Do let me know if I'm missing something here!}\\
 
-\subsection*{Datasets}
+In scRNA-seq, dropouts and bursting lead to bias in parameter estimation.
+Our simulation framework alleviates this problem by using zero-truncated negative binomial (ZTNB) method-of-moments estimators \citep{Moore1986, McCullagh1989} on the positive counts to estimate the expression fraction $\lambda_j = E[Y_{ij}/N_i]$, with $N_i = \sum_j Y_{ij}$ the sequencing depth of cell $i$, and the negative binomial dispersion $\theta_j = 1/\phi_j$.
+Specifically, initial NB-based estimators are iteratively updated according to the ZTNB-based estimators provided by
+\begin{eqnarray} 
+\hat\lambda_{j}^{new} &=& \frac{ \sum_i Y_{ij_{(+)}} \left ( 1-f_{NB}(0 ; \hat \lambda_j N_i, \hat \theta_j) \right )}{\sum_i N_i},\\
+\hat\theta_j^{new} &=& \frac{\sum_{i}(\hat\lambda_j N_i)^2}{\sum_i Y_{ij_{(+)}}^2 \left ( 1-f_{NB}(0; \hat\lambda_j N_i, \hat\theta_j) \right) - \sum_{i} (\hat\lambda_j N_i)^2 - \sum_i (\hat\lambda_j N_i)}, \nonumber
+\end{eqnarray}
+where $Y_{ij_{(+)}} = Y_{ij}I(Y_{ij} \geq 0)$ denotes the positive count for gene $j$ in cell $i$.
+These estimates are then used to simulate counts according to a negative binomial distribution. 
 
-\fanny{Add section with a description for the different datasets.}\\
+%dropouts
+We additionally simulate excess zeros by modeling the empirical zero abundance $p_{ij} = I(Y_{ij}=0)$   
+as a function of an interaction between the gene-specific expression intensity, measured as average log count per million 
+(CPM) 
+$$\hat A_j \approx \log_2 \frac{10^6}{n} \sum_{i=1}^n \frac{Y_{ij}}{N_i}$$ 
+(as calculated using the \RObj{aveLogCPM} function from  \RPack{edgeR}), and the cell-specific sequencing depth $N_i$, using a semi-parametric additive logistic regression model,
+\begin{eqnarray} \label{eq:zeroModel}
+p_{ij} &\sim& B(\rho_{ij}),  \\
+\ln \left ( \frac{\rho_{ij}}{1-\rho_{ij}} \right )  &=& s(\hat A_j) + \ln(N_i) + s(\hat A_j) \times \ln(N_i), \nonumber
+\end{eqnarray} 
+where $B(\rho_{ij})$ denotes the Bernoulli distribution with parameter $\rho_{ij}$ and $s(\cdot)$ a non-parametric thin-plate spline \citep{Wood2003}. 
+We then compare, for every gene, the estimated probability of zero counts based on the model in Equation \eqref{eq:zeroModel} to the corresponding NB-based probability $f_{NB}(0;\hat \mu_{ij}, \hat \theta_j)$ with $\hat \mu_{ij} = \hat \lambda_j N_i$, and randomly add excess zeros whenever the former probability is higher than the latter. 
+The model in Equation \eqref{eq:zeroModel} is motivated by dataset-specific associations observed in real scRNA-seq datasets (Additional File 1: Figures \ref{fig:zeroLibConquer}, \ref{fig:zeroCpmConquer}). 
+%end
 
-\subsection*{Case study}
-The expression data for the case study was downloaded from Supplementary Data accompanying the original paper downloaded at \url{http://linnarssonlab.org/drg/}. Non single-cells are removed and only neuronal cells are retained for analysis, resulting in the set of $622$ cells that were used for the main analyses in Usoskin et al. (2014) \cite{Usoskin2014}. 
-For differential expression analysis, the picking session was included as a covariate in all models.
-Contrasts were defined for the model coefficients to test for mean differential expression between one cell type and the average across all other cell types. Posterior probabilities are estimated with zingeR using 500 EM iterations or until convergence.
-For the mock comparison, we create two conditions with $45$ cells each. In every condition 15 cells from each picking session are randomly selected over all cell types, for 30 iterations. In every iteration we test for significance of the mock variable and evaluate the false positive rate by considering the proportion of p-values $\le 0.05$.
-%\review{For the mock comparison, we only evaluate cells from the `Cold' picking session of the `TH' celltype, since this class contained a substantial number of cells that could be randomized without known effects disturbing the analysis. We create $30$ random mock comparisons for a two-group comparison with $45$ cells in every group by randomly assigning the cells to one of two groups and evaluate the false positive rate (FPR) by considering the proportion of p-values $\le 0.01$.}
+This framework acknowledges both gene-specific characteristics as well as broad dataset-specific associations across all genes and provides realistic scRNA-seq data for method evaluation.
+We assessed performance of various DE methods using data simulated based on the \citet{Islam2011} dataset, a subset of the \citet{Trapnell2013} dataset, and a 10x Genomics PBMC dataset. See the ``Real datasets'' section for information on these datasets.
 
+\subsection*{Gene set enrichment analysis}
 
-\subsection*{Method comparison}
-We compare zingeR to state of the art RNA-seq tools edgeR (v3.19.0) \cite{Robinson2010a,McCarthy2012a}, DESeq2 (v1.17.1) \cite{Love2014} and limma-voom (v3.30.13) \cite{Law2014}; scRNA-seq dedicated tools scde (v2.1.2) \cite{Kharchenko2014}, MAST (v0.933) \cite{Finak2015} and NODES (v0.0.0.9010) \cite{Sengupta2016}; and metagenomeSeq (v1.15.4) \cite{Paulson2013} developed to account for zero-inflation in metagenomics applications. 
-A ZINB model is also implemented in ShrinkBayes \cite{VandeWiel2014}, but the method does not scale to the typical sample sizes observed in scRNA-seq data and has many tuning parameters, which leads us to not consider the method for comparison purposes. 
-For all methods, all genes are considered for analysis unless the method has a default filtering step (e.g. independent filtering step for DESeq2 and zingeR based on the p-values). All samples are retained for analysis except for the NODES analysis where the default filtering step on the samples was used since it would frequently run into errors otherwise. For DESeq2, we allowed for default shrinkage of the fold changes because this notably improved its performance and we disabled the default imputation step.
-Also, for the zingeR\_DESeq2 analysis we used the new \texttt{poscounts} normalization procedure explained above.
-%MAST\_count is a MAST analysis where only the p-values of the continuous (count) part of the hurdle model are used for inference, while for the regular MAST analysis the p-values from the discrete and continuous part are aggregated \cite{Finak2015}.
-Other settings were set to the default for all other methods.
-Performance is compared based on false discovery proportion-true positive rate (FDP-TPR) curves using the iCOBRA package\cite{Soneson2016b}.
-The p-values for all methods have been corrected with the Benjamini and Hochberg FDR method \cite{Benjamini1995}, unless specified otherwise.
+To identify cell types corresponding to the two CD4+ T-cell subclusters of the 10x Genomics PBMC dataset, we used gene set enrichment analysis (GSEA) with the function \RObj{fgsea} from the Bioconductor R package \RPack{fgsea} (v1.4.0) \citep{Sergushichev2016} and gene sets for $64$ immune and stroma cell types from the R package \RPack{xCell} (v1.1.0) \citep{Aran2017}. For each DE method, the input to \RObj{fgsea} is a list of genes ranked by a test statistic comparing expression in the two CD4+ T-cell subclusters. To facilitate comparison between DE methods, the test statistic used here is a transformation of the unadjusted $p$-values ($p$) with the sign of the log-fold-change ($lfc$): $\Phi^{-1}(1-p/2)*\text{sign}(lfc)$, where $\Phi(\cdot)$ denotes the standard Gaussian cumulative distribution function. 
+As suggested by \RPack{fgsea}, all genes were used for the analysis. To assess the enrichment/depletion of one cluster compared to the other cluster, we used the normalized enrichment score (NES). The enrichment score (ES) is the same as in the Broad GSEA implementation \citep{Subramanian2005} and reflects the degree to which a gene set is overrepresented at the top or bottom of a ranked list of genes. Briefly, the ES is calculated by walking down the ranked list of genes, increasing a running-sum statistic when a gene is in the gene set and decreasing it when it is not. A positive ES indicates enrichment at the top of the ranked list; a negative ES indicates enrichment at the bottom of the ranked list. The enrichment score is then normalized by the mean enrichment of random samples of genes, where genes are permuted from the original ranked list ($10,000$ permutations were used).  
 
-\subsection*{Implementation} 
+\subsection*{Real datasets}
+\paragraph{Usoskin dataset.} 
+This dataset concerns mouse neuronal cells from the dorsal root ganglion, sequenced on either an Illumina Genome Analyzer IIx or HiSeq 2000. \citep{Usoskin2014}. The cells were robotically picked in three separate sessions and the 5'-end of the transcripts sequenced. The expression measures were downloaded from ``Supplementary Data'' accompanying the original manuscript (\url{http://linnarssonlab.org/drg/}). After quality control and sample filtering (removal of non-single cells and non-neuronal cells), the authors considered $622$ cells which were classified into eleven neuronal cell type categories. Only the genes with more than $20$ non-zero counts were retained, for a total of $12,132$ genes.
+ 
+The authors acknowledge the existence of a batch effect related to the picking session for the cells. For differential expression analysis, the picking session was therefore included as a batch covariate in all models. 
 
-\fanny{change this part accordingly.}\\
-All code to reproduced the analyses reported in the paper are available at \url{https://github.com/statOmics/zingeRPaper}.
-Our method and the simulation framework is available as an R package zingeR: zero-inflated negative binomial gene expression in R and development will be hosted on GitHub at \url{https://github.com/statOmics/zingeR}.
-The package will be submitted to R/Bioconductor (\url{http://www.bioconductor.org}).
+To mimic a null dataset with no differential expression, we created two groups of $45$ cells each, where, for each group, $15$ cells were sampled at random, without replacement (over all cell types) from each picking session. For each of $30$ such mock null datasets, we considered seven methods to identify genes that are DE between the two groups and declared a gene DE if its nominal unadjusted $p$-value was less than or equal to $0.05$. For these mock datasets, any gene declared DE between the two groups is a false positive. Thus, the \textit{nominal} per-comparison error rate (PCER) of $0.05$ for each method is compared to its \textit{actual} PCER which is simply the proportion of genes declared DE.
+
+\paragraph{10x Genomics PBMC dataset.} 
+We analyzed a dataset of peripheral blood mononuclear cells (PBMC) freely available from 10x Genomics (\url{https://support.10xgenomics.com/single-cell-gene-expression/datasets/1.1.0/pbmc3k}). We downloaded the data from \url{https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz}, which correspond to $2,700$ single cells sequenced on the Illumina NextSeq 500 using unique molecular identifiers (UMI).
+We clustered cells following the tutorial available at 
+\url{http://satijalab.org/seurat/pbmc3k_tutorial.html} and using the R package \RPack{Seurat} (v2.1.0) \citep{Butler2017}. The major steps of the pipeline are quality control, data filtering, identification of high-variance genes, dimensionality reduction using the first ten components from principal component analysis (PCA), and graph-based clustering. 
+To identify cluster markers, we used our ZINB-WaVE-weighted DE method instead of the method implemented in \RPack{Seurat}. 
+
+We created $30$ mock null datasets and identified DE genes on these as for the Usoskin dataset, i.e., we created two groups of $45$ cells each, by sampling at random, without replacement from the $2,700$ cells of the real dataset (no batch information available). 
+
+\paragraph{Islam dataset.} 
+The count table for the \citet{Islam2011} dataset was downloaded from the Gene Expression Omnibus (GEO) with accession number GSE29087. The Islam dataset represents $44$ embryonic fibroblasts and $48$ embryonic stem cells in the mouse, sequenced on an Illumina Genome Analyzer II. Negative control wells were removed and only the $11,796$ genes with at least $5$ positive counts were retained for analysis. For the simulation, we generated datasets with $2$ groups of $40$ cells each.
+
+\paragraph{Trapnell dataset.} 
+The dataset from \citet{Trapnell2013} was downloaded from the preprocessed single-cell data repository conquer (\url{http://imlspenticton.uzh.ch:3838/conquer}). Cells were sequenced on either an Illumina HiSeq 2000 or HiSeq 2500. We only used the subset of cells corresponding to the 48h and 72h timepoints of differentiating human myoblasts in order to generate two-group comparisons. Wells that do not contain one cell or that contain debris were removed. We used a more stringent gene filtering criterion than for the Islam dataset and retained the $24,576$ genes with at least $10$ positive counts. The simulated datasets contain two conditions with $75$ cells in each condition, thereby replicating the sample sizes of the Trapnell dataset.
+
+\subsection*{Software implementation} 
+Our novel scRNA-seq simulation framework is available on the GitHub repository of this manuscript (\url{https://github.com/statOmics/zinbwaveZinger}) and is soon to be submitted as an R package to the Bioconductor project (\url{http://www.bioconductor.org}).
+%implemented in an R package \RPack{zingeR} soon to be submitted to the Bioconductor Project (\url{http://www.bioconductor.org}).
+The ZINB-WaVE weight computation is implemented in the \RObj{computeObservationalWeights} function of the Bioconductor R package \RPack{zinbwave}. 
+ZINB-WaVE-weighted \RPack{edgeR} can be implemented using the \RObj{glmWeightedF} function from the \RPack{zinbwave} package, while ZINB-WaVE-weighted \RPack{DESeq2} can be implemented using the native \RObj{nbinomWaldTest} function from the \RPack{DESeq2} package. More details on a ZINB-WaVE weighted analysis can be found in the \RPack{zinbwave} vignette (\url{http://bioconductor.org/packages/zinbwave/}).
+Additionally, all analyses and figures reported in the manuscript can be reproduced using code provided in a GitHub repository (\url{https://github.com/statOmics/zinbwaveZinger}). 
 
 %\section*{List of abbreviations}
-
-
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -710,105 +756,26 @@ Not applicable.
 Not applicable.
 
 \section*{Availability of data and materials}
-The Islam dataset was downloaded from the Gene Expression Omnibus with series number GSE29087.
-The Trapnell dataset was downloaded from the conquer repository \cite{Soneson2017} at \url{http://imlspenticton.uzh.ch:3838/conquer/}.
-The Usoskin dataset was downloaded from \url{http://linnarssonlab.org/drg/}.
-All code to reproduced the analyses reported in the paper are available at \url{https://github.com/statOmics/zingeRPaper}.
-Our method and the simulation framework is available as an R package zingeR: zero-inflated negative binomial gene expression in R and development will be hosted on GitHub at \url{https://github.com/statOmics/zingeR}.
-The package will be submitted to R/Bioconductor (\url{http://www.bioconductor.org}).
+The Islam dataset was downloaded from the Gene Expression Omnibus with accession number GSE29087.
+The Trapnell dataset was downloaded from the conquer repository \citep{Soneson2017} at \url{http://imlspenticton.uzh.ch:3838/conquer/}.
+The Usoskin dataset was downloaded from \url{http://linnarssonlab.org/drg/}. 
+
+The simulation framework is available on the GitHub repository and will soon be submitted as a package to the Bioconductor Project (\url{http://www.bioconductor.org}). 
+
+All analyses and figures reported in the manuscript can be reproduced using code provided in a GitHub repository (\url{https://github.com/statOmics/zinbwaveZinger}). 
 
 \section*{Competing interests}
 The authors declare that they have no competing interests.
   
 \section*{Funding}
 This research was supported in part by IAP research network ``StUDyS'' grant no. P7/06 of the Belgian government (Belgian Science Policy) and the Multidisciplinary Research Partnership ``Bioinformatics: from nucleotides to networks'' of Ghent University. KVDB is supported by a Strategic Basic Research PhD grant from the Research Foundation - Flanders (FWO) no. 1S 418 16N.
- CS is supported by the Forschungskredit of the University of Zurich, grant no. FK-16-107. ML is supported by NIH grant no. CA142538-07. 
+CS is supported by the Forschungskredit of the University of Zurich, grant no. FK-16-107. ML is supported by NIH grant no. CA142538-08. DR and SD were supported by the National Institutes of Health BRAIN Initiative (grant U01 MH105979, PI: John Ngai). JPV was supported by the French National Research Agency (grant ABS4NGS ANR-11-BINF-0001), the European Research Council (grant ERC-SMAC-280032), the Miller Institute for Basic Research in Science, and the Fulbright Foundation.
  
-\section*{Author's contributions}
-LC and KVDB conceived and designed the study. LC and KVDB implemented the method and KVDB performed the analyses. ML extended the DESeq2 package. All authors contributed to the writing of the manuscript. All authors read and approved the final manuscript.
+\section*{Author's contributions} 
+KVDB, FP, DR, SD, and LC conceived the methodology and designed the study, with input from all other authors. KVDB, FP, DR, and LC implemented the method and KVDB and FP performed the analyses. ML extended the \RPack{DESeq2} package. KVDB, FP, SD, and LC wrote the manuscript. All authors read and approved the final manuscript.
 
 \section*{Acknowledgements}
-We thank Joris Meys for his advice on building the \texttt{R} package.\\
-
-
-============================================= keep in case
-\section*{EM algorithm}
-The EM-algorithm recasts the mixture model into a missing data problem by introducing the latent variable $Z_{gi}$, which is assumed to follow a Bernoulli distribution: $Z_{gi} \sim B(\pi_i)$.
-Hence, the likelihood
-
-\[ L(y_{gi};\mu_{gi},\phi_g,\pi_i) = \prod_{i=1}^n \left\{ \pi_i\delta + (1-\pi_i)f_{NB}(\mu_{gi},\phi_g) \right\} \]
-
-can be augmented with the $z_{gi}$ resulting in the joint likelihood
-
-\[ L(y_{gi},z_{gi};\mu_{gi},\phi_g,\pi_i) = \prod_{i=1}^n  \pi_i^{z_{gi}} \left\{ (1-\pi_i)f_{NB}(\mu_{gi},\phi_g) \right\}^{(1-z_{gi})} \]
-
-which in turn allows an efficient factorization by conditioning on $z_{gi}$.
-The EM-algorithm iterates over an expectation (E) and maximization (M) step until convergence.
-In the E-step the expected joint log likelihood is calculated given the data and the current values of the parameter estimates, i.e. the parameter estimates in the previous iteration $k$, $\mb{\theta}^k = \left\{ \mu_{gi}^k, \phi_g^k, \pi_i^k \right\}$.
-In the M-step the expected log-likelihood is maximized to update the parameter estimates.
-For our mixture model, the expected joint log-likelihood $l(y_{gi},z_{gi})$ given the data and the current parameter estimates equals
-
-\begin{align*}
-%Q&=E(l(y_{gi},z_{gi})|y_{gi}, \mb{\theta}^k) = E(z_{gi}|y_{gi}, \mb{\theta}^k)\log(\pi_i^k) + E(z_{gi}|y_{gi}, \mb{\theta}^k)\log(\delta) + \\
-%&\hskip0.1\textwidth [1-E(z_{gi}|y_{gi},\mb{\theta}^k)]\log(1-\pi_i^k) + [1-E(z_{gi}|y_{gi}, \mb{\theta}^k)]\log [f_{NB}(\mu_{gi}^k,\phi_g^k)]
-Q^{k+1}&=E(l(y_{gi},z_{gi})|y_{gi}, \mb{\theta}^k) = E(z_{gi}|y_{gi}, \mb{\theta}^k)\log(\pi_i^k) + [1-E(z_{gi}|y_{gi},\mb{\theta}^k)]\log(1-\pi_i^k) + \\
-&\hskip0.26\textwidth [1-E(z_{gi}|y_{gi}, \mb{\theta}^k)]\log [f_{NB}(\mu_{gi}^k,\phi_g^k)]
-\end{align*}
-
-which shows that calculating $Q^{k+1}$ only involves replacing $z_{gi}$ by its conditional expectation $E(z_{gi}|y_{gi}, \mb{\theta}^k)$ after which $Q^{k+1}$ can be maximized over the mixture distribution parameters. In this expression, $\pi_g^k$ represents the parameter estimate for gene $g$ in step $k$, and similar notation is used for the other parameters.
-
-\begin{enumerate}	
-	\item \textbf{E-step:} Calculate $Q^{k+1}$ using the conditional expectations $E(z_{gi}|y_{gi}, \mb{\theta}^k)$, which are the posterior probabilities for counts to belong to the zero-inflation component:
-	
-	\[ E(z_{gi}|y_{gi}, \mb{\theta}^k) = \frac{\hat{\pi}_{i}^k}{\hat{\pi}_{i} + (1-\hat{\pi}_{i}^k) f_{NB}(y_{gi};\hat{\mu}_{gi}^k,\hat{\phi}_g^k)} \]
-	
-	\item \textbf{M-step:} Maximize $Q^{k+1}$ to update parameter estimates.
-
-	\begin{enumerate}
-		\item The parameters for the count component $\left\{\mu_{gi}^k,\phi_g^k \right\}$ are updated using the  \texttt{edgeR} framework \cite{Robinson2010a} by incorporating observation-level weights $w_{gi}^k$ (Equation \eqref{eq:weights}). In principle, any negative binomial software tool that allows for weights can be used in this step, but we have found \texttt{edgeR} to provide accurate and fast results. Note, we use gene-wise dispersion estimates and we do not use shrinkage within the EM-algorithm.
-		
-		\item
-		The mixture parameters $\pi_i^{k}$ are updated with a logistic regression model of $E(z_{gi}|y_{gi}, \mb{\theta}^k)$ on the effective library size of a sample $N_i^{eff}$ to estimate the expected probability of zero-inflation for a cell $i$
-	
-		\[ \log\left\{\frac{\pi_{i}}{1-\pi_{i}}\right\} = \mb{X}\mb{\alpha} \]
-
-		where $\mb{X}$ is the model matrix containing an intercept and the effective library size $N_i^{eff} = s_i N_i$ with $N_i$ the library size and $s_i$ the normalization factor for cell $i$ as estimated with a global scaling normalization procedure. The normalization procedures used in this manuscript are implemented as default options in the zingeR package. However, zingeR can work with any global scaling normalization procedure when providing user-defined normalization factors as an optional argument. Optionally, other predictors can be used in the zero-excess model that are associated with zero-inflation, for example the batch effects in our case study. To gain power, the zero-excess model may also incorporate a measure for the gene's average expression which is also linked to zero abundance (Additional File 1: Figure S5). However, we found that this model deteriorates FDR control and consider this a topic for further research.
-	\end{enumerate}
-
-	\item Iterate step 1 and 2 until convergence of the data log-likelihood.
-\end{enumerate}
-
-
-\subsection*{Speeding up the EM algorithm}
-Estimating the negative binomial parameters $\left\{\mu_{gi},\phi_g\right\}$ for the count component is the most computer intensive step of the EM algorithm.
-In order to reduce computational burden we developed an EM-algorithm that only estimates the count component parameters after iterative convergence between the mixture parameters $\hat{\pi}_{i}$ and the posterior probabilities $w_{gi}$. The algorithm can be described in pseudocode as follows
-
-\IncMargin{1em}
-\begin{algorithm}[H]
-\SetKwInOut{Input}{input}\SetKwInOut{Output}{output}
-\Input{A matrix of single-cell gene expression counts and design matrix}
-\Output{A matrix of posterior probabilities}
- \emph{initialization of EM-parameters $\left\{\mu_{gi}, \phi_g, \pi_i\right\}$}\;
- j=0\;
- \For{$i \rightarrow maxit$}{
- 	j=j+1\;
-	E-step: estimate posterior probabilities $w_{gi}$\;
-	\If{i=1 \textbf{or} posterior probabilities converged }{
-		M-step on count component: estimate $\{\hat{\mu}_{gi}, \hat{\phi}_g$\}
- 	}
-	M-step on mixture parameters: estimate $\hat{\pi}_{i}$\;
-	\If{convergence of posterior probabilities}{
-		\lIf{j=1}{ \textbf{break} (EM-algorithm has converged)}
-		j=0\;
-	}
-}
-\end{algorithm}
-
-The fast version of the EM-algorithm provides very similar distributions for the posterior probabilities on the Islam and Trapnell datasets (Additional File 1: Figure S6).\\
-
-============================================= end keep in case
-
-
+\lc{We thank Tine Descamps and the students of the Statistical Genomics course, 2015-2016, Ghent University, who assisted us in assessing our initial implementation to unlock RNA-seq tools for zero-inflation during master thesis and project work, respectively.}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                  The Bibliography                       %%
@@ -825,9 +792,10 @@ The fast version of the EM-algorithm provides very similar distributions for the
 %%                                                         %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% if your bibliography is in bibtex format, use those commands:
-\bibliographystyle{bmc-mathphys} % Style BST file (bmc-mathphys, vancouver, spbasic).
-%\bibliography{bmc_article_revision_final.bbl}      % Bibliography file (usually '*.bib' )
+
+% FP: I replaced bibliographystyle bmc-mathphys by unsrtnat to be able to use citet and citep and have sorted citations
+%\bibliographystyle{plainnat} plainnat has citep and citet, but citations are not sorted
+\bibliographystyle{unsrtnat}
 \bibliography{library.bib}      % Bibliography file (usually '*.bib' )
 % for author-year bibliography (bmc-mathphys or spbasic)
 % a) write to bib file (bmc-mathphys only)
@@ -852,77 +820,117 @@ The fast version of the EM-algorithm provides very similar distributions for the
 
 %%
 %% Do not use \listoffigures as most will included as separate files
+\end{backmatter}
 
 \section*{Figures}
 
+
 \begin{figure}[h!]
 	\center
-	%\includegraphics[width=1\textwidth]{../../../figures/introBCVRNAseq.png}
+	\includegraphics[width=.7\textwidth]{introBCVRNAseq.png}
 	%\internallinenumbers
-	\caption{Zero-inflation results in overestimated dispersions and jeopardizes power to discover differential expression. The biological coefficient of variation (BCV) is the square root of the NB dispersion parameter.
-	\textbf{(a)} The BCV plot of a regular bulk RNA-seq experiment. Dispersion estimates generally show a smooth decrease for genes with higher expression.
-	\textbf{(b)} Simulating zero-inflation by randomly introducing 5\% excess zero counts inflates dispersion estimates for the genes with excess zeros. This significantly distorts the estimated mean-variance relationship, as represented by the red line.
-	\textbf{(c)} Downweighting excess zeros by assigning the introduced zeros a weight of zero in dispersion estimation recovers the original mean-variance trend.
-	\textbf{(d)} False discovery proportion - true positive rate (FDP-TPR) performance curves on the zero-inflated data shows that the performance of edgeR (red curve) is deteriorated in a zero-inflated setting due to an overestimation of the dispersion parameter. However, assigning the introduced zeros a weight of zero in the dispersion estimation and model fitting results in a dramatic performance boost. Hence, it is the key to unlocking RNA-seq tools for zero-inflation.
-	}
+	\caption{
+{\em Zero inflation results in overestimated dispersion and jeopardizes power to discover differentially expressed genes.}
+\textbf{(a--e)} 
+Scatterplots of estimated biological coefficient of variation (BCV, defined as the square root of the negative binomial dispersion parameter $\phi$) against average log count per million (CPM) computed using \RPack{edgeR}.
+\textbf{(a)} BCV plot for the real scRNA-seq \citet{Buettner2015} dataset subsampled to $n=10$ cells.
+\textbf{(b)} BCV plot for the real scRNA-seq \citet{Deng2014} dataset subsampled to $n=10$ cells. Both panels (a) and (b) show striped patterns in the BCV plot, which significantly distort the mean-variance relationship, as represented by the red curve.
+\textbf{(c)} BCV plot for a simulated bulk RNA-seq dataset ($n=10$), obtained from the \citet{Bottomly2011} dataset using the simulation framework of \citet{Zhou2014}. Dispersion estimates generally decrease smoothly as gene expression increases.
+\textbf{(d)} BCV plot for a simulated zero-inflated bulk RNA-seq dataset, obtained by randomly introducing 5\% excess zero counts in the dataset from (c). Zero inflation leads to overestimated dispersion for the genes with excess zeros, resulting in striped patterns, as observed also for the real scRNA-seq data in panels (a) and (b).
+\textbf{(e)} BCV plot for simulated zero-inflated bulk RNA-seq dataset from (d), where excess zeros are downweighted in dispersion estimation (i.e., weights of $0$ for excess zeros and $1$ otherwise). Downweighting recovers the original mean-variance trend.
+\textbf{(f)} True positive rate vs. false discovery proportion (FDP-TPR curves) for simulated zero-inflated dataset of (d). The performance of \RPack{edgeR} (red curve) is deteriorated in a zero-inflated setting due to overestimation of the dispersion parameter. However, assigning the excess zeros a weight of zero in the dispersion estimation and model fitting results in a dramatic performance boost (orange curve). Hence, downweighting excess zero counts is the key to unlocking bulk RNA-seq tools for zero inflation.}
 	\label{fig:introRNAseq}
 \end{figure}
 
 
-
 \begin{figure}[h!]
 	\center
-	%\includegraphics[width=1\textwidth]{../../../figures/introBCV_v2.png}
+	\includegraphics[width=1\textwidth]{introBCV_v3.png}
 	%\internallinenumbers
-	\caption[introFigure]{Zero-inflation distorts the mean-variance trend in (sc)RNA-seq data but is correctly identified by the ZINB model. The top panels represent simulated RNA-seq data while the bottom panels represent the scRNA-seq dataset from Islam et al. (2011) \cite{Islam2011}. The biological coefficient of variation (BCV) is the square root of the NB dispersion parameter.
-	%\textbf{(a)} Simulated RNA-seq dataset for a two-group comparison with five samples in each group. The trend shows high dispersion estimates for lowly expressed genes while a smooth decrease is observed for highly expressed genes.
-	\textbf{(a)} Simulated RNA-seq dataset for a two-group comparison with five samples in each group. Randomly replacing 5\% of the expression counts with zeros induces zero-inflation and distorts the mean-variance trend by overestimating the dispersion parameter. The colors represent the average zingeR posterior probability for all zeros from a gene.
-	\textbf{(b)} ROC curve for the correct identification of excess zeros, as stratified by the average log CPM. A very good classification precision is obtained for genes with moderate and high expression, while the identification is harder on genes with low expression, since these genes often have higher dispersion estimates.
-	\textbf{(c)} Histogram of zingeR posterior probabilities for the excess zeros in the zero-inflated bulk RNA-seq dataset. The white bar at $0$ represents the number of introduced excess zeros. Most excess zeros are identified as such by zingeR, see also Additional File 1: Figure S4.
-	%Posterior probabilities on the count component for the introduced zeros in the zero-inflated bulk RNA-seq dataset. Most excess zeros are identified as such by zingeR.
-	\textbf{(d)} Effectively downweighting excess zeros using the posterior probabilities recovers the original mean-variance trend and inference on the NB count component will now no longer be biased because of zero-inflation patterns, illustrating zingeR's ability to account for excess zeros.
-	\textbf{(e)} BCV plot for the Islam dataset \cite{Islam2011} shows that higher variability is observed in scRNA-seq data as compared to bulk RNA-seq data. As in \textbf{(b)}, zero-inflation induces striped patterns in the BCV plot leading to an overestimation of the dispersion parameter of the count component.
-	\textbf{(f)} The sequencing depth of a cell is related to the abundance of zeros, information used by zingeR to identify excess zeros in scRNA-seq datasets when fitting the ZINB model. The pink curve represents the estimated marginal mean on excess zeros for a cell and the difference between the curve and the datapoints represents the estimated expected fraction of zeros that belong to the count component.	
-	\textbf{(g)} zingeR posterior probabilities for all zeros in the Islam dataset identify both NB and excess zeros. However, due to the increased noise in scRNA-seq datasets, some zeros are harder to classify as compared to bulk RNA-seq data.
-	\textbf{(h)} Using the zingeR posterior probabilities as observation weights results in lower estimates of the dispersion parameter, unlocking powerful differential expression analysis with standard RNA-seq DE methods.
+	\caption[introFigure]{
+     {\em Impact of zero inflation on mean-variance relationship for simulated bulk RNA-seq and Islam scRNA-seq datasets.}
+Zero inflation distorts the mean-variance trend in (sc)RNA-seq data, but is correctly identified by the ZINB-WaVE method. The top panels represent simulated data based on the \citet{Bottomly2011} bulk RNA-seq dataset (as in Figure \ref{fig:introRNAseq}), for a two-group comparison with five samples in each group, where 5\% of the counts were randomly replaced by zeros. The bottom panels represent the scRNA-seq dataset from \citet{Islam2011}. 
+\textbf{(a)} The BCV plot shows that randomly replacing 5\% of the read counts with zeros induces zero inflation and distorts the mean-variance trend by leading to overestimated dispersion parameters.  Points are color-coded according to the average ZINB-WaVE posterior probability for all zeros for a given gene and the blue line represents the mean-variance trend estimated with \RPack{edgeR}. 
+\textbf{(b)} Receiver operating characteristic (ROC) curve for the identification of excess zeros by the ZINB-WaVE method. A very good classification precision is obtained.
+\textbf{(c)} Downweighting excess zeros using the ZINB-WaVE posterior probabilities recovers the original mean-variance trend (as indicated with the red line) and inference on the negative binomial count component will now no longer be biased because of zero inflation. The light blue line represents the estimated mean-variance trend for ZINB-WaVE-weighted \RPack{edgeR}. The blue line is the trend estimated by unweighted \RPack{edgeR} on zero-inflated data as in panel (a).
+\textbf{(d)} The BCV plot for the \citet{Islam2011} dataset illustrates the higher variability of scRNA-seq data as compared to bulk RNA-seq data (note the difference in y-axis scales between (a) and (d)). As in (a), zero inflation induces striped patterns leading to an overestimation of the NB dispersion parameter.
+\textbf{(e)} ROC curve for the identification of excess zeros by the ZINB-WaVE method for scRNA-seq data simulated from the Islam dataset using the simulation framework described in ``Methods''. A good classification precision is obtained, but note the difference with bulk RNA-seq data: The noisier scRNA-seq dataset makes excess zero identification harder.
+\textbf{(f)} Using the ZINB-WaVE posterior probabilities as observation weights results in lower estimates of the dispersion parameter, unlocking powerful differential expression analysis with standard bulk RNA-seq DE methods. Note that since many zeros are identified as excess, the scale of the BCV plot is now similar to that of a standard bulk RNA-seq dataset. The red line is the mean-variance trend for unweighted \RPack{edgeR}, as in panel (d), and the light blue line is the mean-variance trend for ZINB-WaVE-weighted \RPack{edgeR}. A similar pattern is observed for the simulated Islam dataset (Additional File 1: Figure \ref{fig:simIslamBCV}).
 	}
 	\label{fig:introBCV}
 \end{figure}
 
-\begin{figure}[h!]
-	\center
-	%\includegraphics[width=1\textwidth]{../../../figures/RNASeq_composite.png}
-	%\internallinenumbers
-	\caption{ Comparison of methods on simulated RNA-seq data. 
-		The left panel (\textbf{a}) shows performance curves on the simulated dataset where $5\%$ of the counts were set to zero. Conventional RNA-seq methods break down due to zero-inflation while most scRNA-seq methods perform reasonably. scde seems to have a good performance in a moderate zero-inflation setting, however it provides very conservative FDR control as suggested by its FDR working points. zingeR\_edgeR outperforms all other methods and in fact performs close to an edgeR analysis based on the truth, where the introduced zeros are effectively downweighted by setting their weights to zero, showing that zingeR\_edgeR correctly identified most excess zeros. A similar result is observed for zingeR\_DESeq2.
-	Right panel (\textbf{b}) shows the performance of the evaluated methods on simulated RNA-seq data, suggesting a superior performance of zingeR\_edgeR and providing evidence that the method performs well in non zero-inflation settings. Note, that the working points for zingeR\_DESeq2 are more conservative as compared to DESeq2 due to the use of the t-distribution instead of the Gaussian distribution for the Wald test.
-	}
-	\label{fig:RNASeqPerf}
-\end{figure}
-
-
 
 \begin{figure}[h!]
 	\center
-	%\includegraphics[width=1\textwidth]{../../../figures/scSimulation_composite_cutoff.png}
+	\includegraphics[width=1\textwidth]{scSimulation_composite_cutoff_noLimma.png}
 	%\internallinenumbers
-	\caption{Comparison of methods on simulated scRNA-seq data. 
-	\textbf{(a)} Performance on scRNA-seq data based on Islam simulation. 
-	\textbf{(b)} Performance based on Trapnell simulation. 
-	The zingeR workflows clearly outperform other methods in case of severe zero-inflation (a) and are among the best performers in the Trapnell simulation with few excess zeros (b). Note, that the positive counts normalization provides an enormous boost in performance for DESeq2 in the Trapnell simulation. Dedicated methods  scde and metagenomeSeq specifically developed to deal with excess zeros are dominated in both simulations by zingeR workflows and by DESeq2 with positive counts normalization. DESeq2 curves in panel (a) are cut-off due to NA p-values as a result of independent filtering. Full FDP-TPR curves are provided in Additional File 1: Figure S9.}
+	\caption{\underline{Comparison of DE methods on simulated scRNA-seq data.}
+	\textbf{(a)} scRNA-seq data simulated from \citet{Islam2011} dataset ($n=90$). 
+	\textbf{(b)} scRNA-seq data simulated from \citet{Trapnell2013} dataset ($n=150$).
+DE methods are compared based on scatterplots of the true positive rate (TPR) vs. the false discovery proportion (FDP). Circles represent working points on a nominal 5\% FDR level and are filled if the empirical FDR (i.e., FDP) is below the nominal FDR.
+Methods based on ZINB-WaVE weights clearly outperform other methods for both simulated datasets. Note that the methods differ in performance between datasets, possibly because of a higher degree of zero inflation in the Islam dataset. The \RPack{SCDE} and \RPack{metagenomeSeq} methods, specifically developed to deal with excess zeros, are outperformed in both simulations by ZINB-WaVE-based methods and by \RPack{DESeq2}. The \RPack{DESeq2} curve in panel (a) is cut off due to NA $p$-values resulting from independent filtering. 
+The behavior in the lower half of the curve for \RPack{MAST} in (b) is due to an extrapolation between two low working points. 
+Full FDP-TPR curves are provided in Additional File 1: Figure \ref{fig:suppScRNASeqPerf}. \fanny{Comment from Davide for figure 3b for MAST:  Shouldn’t we just stop the curve at the lowest working point the same way that we stop DESeq2 on the higher point before the NAs. What do you think Koen? I think it might be a good idea not to draw a point when there is no point.}} 
 	\label{fig:scRNASeqPerf}
 \end{figure}
 
 
 \begin{figure}[h!]
 	\center
-	%\includegraphics[width=1\textwidth]{../../../figures/caseUsoskin_composite.png}
+	\includegraphics[width=.8\textwidth]{scSimulation_10x_cutoff_noLimma.png}
 	%\internallinenumbers
-	\caption{Case study on neuronal cells. \textbf{(a)} The association of zero abundance with sequencing depth. The three different picking sessions differ in their sequencing depth, causing an attenuated global relationship (blue line). However, accounting for the batch effect in zingeR's zero-excess model, allows for a correct model of sequencing depth with zero abundance. 
-	\textbf{(b)} The distribution of posterior probabilities with (white) and without (green) including the batch effect in the zero-excess model. Including the batch effect results in many more zeros being identified as truly zero excess (i.e. the higher bar near a posterior probability of zero) and negative binomial zeros, hence increasing classification certainty.
-	\textbf{(c)} False positive rate (FPR) evaluation on $30$ mock comparisons across all cell types. Note, that a different scale is used for metagenomeSeq.}
-	\label{fig:usoskin}
+	\caption{\underline{Comparison of DE methods on simulated scRNA-seq datasets.} 
+DE methods are compared based on FDP-TPR curves for data simulated from a 10x Genomics PBMC scRNA-seq dataset ($n=1,200$). 
+Circles represent working points on a nominal 5\% FDR level and are filled if the empirical FDR (i.e., FDP) is below the nominal FDR.
+10x Genomics sequencing typically involves high-throughput and massive multiplexing, resulting in very shallow sequencing depths and thus low counts, making it extremely difficult to identify excess zeros. Unweighted and ZINB-WaVE-weighted \RPack{edgeR} are tied for best performance, followed by ZINB-WaVE-weighted \RPack{DESeq2}. In general, bulk RNA-seq methods are performing well in this simulation, probably because the extremely high zero abundance in combination with low counts can be reasonably accommodated by the negative binomial distribution. 
+The \RPack{DESeq2} curve is cut off due to NA $p$-values resulting from independent filtering. 
+The behavior in the lower half of the curve for \RPack{NODES} is due to an extrapolation between two low working points. 
+Full FDP-TPR curves are provided in Additional File 1: Figure \ref{fig:suppScRNASeq10xPerf}. \fanny{Same comment as previous figure but for NODES.}} 
+	\label{fig:scRNASeq10xPerf}
 \end{figure}
+
+
+\begin{figure}[ht]
+\begin{center}
+\includegraphics[keepaspectratio=true,scale=0.2]{fprUsoskin-1.png}
+\end{center}
+\caption{{\em False positive control on mock null Usoskin datasets ($n=622$ cells).} 
+\textbf{(a)} The scatterplot and GLM fits (R \RObj{glm} function with \RCmd{family=binomial}), color-coded by batch (i.e., picking session\koen{s Cold, RT-1 and RT-2}), illustrate the association of zero abundance with sequencing depth. The three batches differ in their sequencing depths, causing an attenuated global relationship when pooling cells across batches (blue curve). Adjusting for the batch effect in the ZINB-WaVE model allows to properly account for the relationship between sequencing depth and zero abundance. 
+\textbf{(b)} Histogram of ZINB-WaVE weights for zero counts for original Usoskin dataset, with (white) and without (green) including batch as a covariate in the ZINB-WaVE model. The higher mode near zero for batch adjustment indicates that more counts are being classified as dropouts, suggesting more informative discrimination between excess and NB zeros. 
+\textbf{(c)} Boxplot of per-comparison error rate (PCER) for $30$ mock null datasets for each of seven DE methods; ZINB-WaVE-weighted methods are highlighted in blue.
+\textbf{(d)} Histogram of unadjusted $p$-values for one of the datasets in (c). ZINB-WaVE was fit with intercept, cell type covariate (actual or mock), and batch covariate (unless specified otherwise) in $X$, $V = {\bf 1}_J$, $K=0$ for $W$, common dispersion, and $\epsilon=10^{12}$. 
+}
+\label{f:fdrUsoskin}
+\end{figure}
+
+
+\begin{figure}[ht]
+\begin{center}
+\includegraphics[keepaspectratio=true,scale=0.15]{tenxcase-1}
+\end{center}
+\caption{{\em Biologically meaningful DE results for 10x Genomics PBMC dataset.}
+{\bf (a)} Scatterplot of the first two t-SNE dimensions obtained from the first $10$ principal components. Cells are color-coded by clusters found using the \RPack{Seurat} graph-based clustering method on the first $10$ principal components. 
+Pseudo-color images on the right display normalized enrichment scores (NES) after gene set enrichment analysis (GSEA) for cell types related to CD4+ T-cells (see ``Methods''), for clustering based on 
+\textbf{(b)} the first $10$ principal components and 
+\textbf{(c)} $W$ from ZINB-WaVE with $K=20$. 
+For dimensionality reduction, ZINB-WaVE was fit with $X = {\bf 1}_n$, $V = {\bf 1}_J$, $K=20$ for $W$ (based on AIC), common dispersion, and $\epsilon=10^{12}$. To compute the weights for DE analysis, ZINB-WaVE was fit with intercept and cell type covariate in $X$, $V = {\bf 1}_J$, $K=0$ for $W$, common dispersion, and $\epsilon=10^{12}$.
+NES for more cell types are shown in Additional File 1: Figure \ref{f:tenxcaseNESall}. 
+}
+\label{f:tenxcaseNES}
+\end{figure}
+
+
+%\begin{figure}[h!]
+%	\center
+	%\includegraphics[width=1\textwidth]{../../../figures/RNASeq_composite.png}
+	%\internallinenumbers
+%	\caption{ Comparison of methods on simulated RNA-seq data. 
+%		The left panel (\textbf{a}) shows performance curves on the simulated dataset where $5\%$ of the counts were set to zero. Conventional RNA-seq methods break down due to zero inflation while most scRNA-seq methods perform reasonably. scde seems to have a good performance in a moderate zero inflation setting, however it provides very conservative FDR control as suggested by its FDR working points. zingeR\_edgeR outperforms all other methods and in fact performs close to an edgeR analysis based on the truth, where the introduced zeros are effectively downweighted by setting their weights to zero, showing that zingeR\_edgeR correctly identified most excess zeros. A similar result is observed for zingeR\_DESeq2.
+%	}
+%	\label{fig:RNASeqPerf}
+%\end{figure}
+
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -946,15 +954,13 @@ The fast version of the EM-algorithm provides very similar distributions for the
    %   \end{tabular}
 %\end{table}
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                               %%
 %% Additional Files              %%
 %%                               %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\pagebreak
+\input{supplementary.tex}
 
-\section*{Additional Files}
-  \subsection*{Additional file 1 --- Supplementary figures and tables}
-This file contains all supplementary figures and tables to the manuscript.
-
-\end{backmatter}
 \end{document}
