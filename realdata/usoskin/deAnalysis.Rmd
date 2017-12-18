@@ -254,6 +254,67 @@ for(i in 1:ncol(L)) resList[[i]] = results(dse,contrast=L[,i])
 lapply(resList, function(x) sum(x$padj<=0.05, na.rm=TRUE))
 ```
 
+### zingeR_edgeR
+
+```{r}
+d <- DGEList(counts)
+d <- suppressWarnings(edgeR::calcNormFactors(d))
+design <- model.matrix(~ cellType+batch)
+weights <- zingeR::zeroWeightsLS(counts = d$counts, design = design, maxit = 500, normalization = "TMM", verbose = TRUE)
+d$weights <- weights
+d <- estimateDisp(d, design)
+fit <- glmFit(d,design)
+L <- matrix(0,nrow=ncol(fit$coefficients),ncol=11)
+rownames(L) <- colnames(fit$coefficients)
+colnames(L) <- c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH")
+L[2:11,1] <- -1/10 #NF1 vs. others
+L[2:11,2] <- c(1,rep(-1/10,9)) #NF2 vs. others
+L[2:11,3] <- c(-1/10,1,rep(-1/10,8)) #NF3 vs. others
+L[2:11,4] <- c(rep(-1/10,2),1,rep(-1/10,7)) #NF4 vs. others
+L[2:11,5] <- c(rep(-1/10,3),1,rep(-1/10,6)) #NF5 vs. others
+L[2:11,6] <- c(rep(-1/10,4),1,rep(-1/10,5)) #NP1 vs. others
+L[2:11,7] <- c(rep(-1/10,5),1,rep(-1/10,4)) #NP2 vs. others
+L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
+L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
+L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
+L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
+lrtList=list()
+for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i], ZI=TRUE, independentFiltering=TRUE)
+padjListZingerEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
+deGenesZingerEdgeR=unlist(lapply(padjListZingerEdgeR,function(x) sum(x<.05)))
+
+```
+
+### zingeR_DESeq2
+
+```{r}
+  colData <- data.frame(cellType = cellType, batch=batch)
+  design <- model.matrix(~ cellType + batch)
+  dse <- DESeqDataSetFromMatrix(countData = counts, colData = colData, design = ~cellType+batch)
+  weights <- zingeR::zeroWeightsLS(counts = counts, design = design, maxit = 500, normalization = "DESeq2_poscounts", colData = colData, designFormula = ~cellType + batch, verbose = TRUE)
+  assays(dse)[["weights"]] <- weights
+  dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
+  dse <- estimateDispersions(dse)
+  dse <- nbinomWaldTest(dse, modelMatrixType="standard", betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-13, minmu=1e-3)
+resultsNames(dse) #for building contrasts, see ?results
+L=matrix(0,nrow=length(resultsNames(dse)),ncol=11)
+rownames(L)=resultsNames(dse)
+L[2:11,1] <- -1/10 #NF1 vs. others
+L[2:11,2] <- c(1,rep(-1/10,9)) #NF2 vs. others
+L[2:11,3] <- c(-1/10,1,rep(-1/10,8)) #NF3 vs. others
+L[2:11,4] <- c(rep(-1/10,2),1,rep(-1/10,7)) #NF4 vs. others
+L[2:11,5] <- c(rep(-1/10,3),1,rep(-1/10,6)) #NF5 vs. others
+L[2:11,6] <- c(rep(-1/10,4),1,rep(-1/10,5)) #NP1 vs. others
+L[2:11,7] <- c(rep(-1/10,5),1,rep(-1/10,4)) #NP2 vs. others
+L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
+L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
+L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
+L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
+resList=list()
+for(i in 1:ncol(L)) resList[[i]] = results(dse,contrast=L[,i])
+lapply(resList, function(x) sum(x$padj<=0.05, na.rm=TRUE))
+```
+
 ## plot results
 
 ```{r resultsData}
@@ -297,7 +358,7 @@ resultsZingeR = data.frame(
             670, 981, 314, 429, 1042, 1692, 671, 510 , 1555, 136, 2024, #zingeR DESeq2
             860 , 1375 , 401 , 654 , 1149 , 1942 , 933 , 380 , 1909 , 403 , 2458, #egdeR
             495 , 772 , 241 , 508 , 959 , 1802 , 967 , 464 , 2376 , 193 , 2919, #zinb edgeR
-            1004 , 1638 , 539 , 895 , 1601 , 2486 , 1231 , 679 , 1936 , 508 , 3667), #zingeR edger
+            981, 1740,  531,  797, 1542, 2237, 1092,  547, 2053,  492, 2769), #zingeR edger
     contrast=rep(c("NF1","NF2","NF3","NF4","NF5","NP1","NP2","NP3","PEP1","PEP2","TH"),9),
     method=rep(c("SCDE","MAST","limma-voom","DESeq2","ZINB-WaVE_DESeq2","zingeR_DESeq2", "edgeR","ZINB-WaVE_edgeR","zingeR_edgeR"),each=11))
 resultsZingeR$method=factor(resultsZingeR$method,levels=c("SCDE","MAST","DESeq2","ZINB-WaVE_DESeq2","zingeR_DESeq2","edgeR","ZINB-WaVE_edgeR","zingeR_edgeR","limma-voom"))

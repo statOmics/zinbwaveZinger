@@ -11,6 +11,7 @@ To be able to run the code in this repo, it is required to have `R` (>=3.4) and 
 ### R packages
 
 - [zingeR](https://github.com/statOmics/zingeR)  
+- countsimQC
 - Seurat  
 - ggplot2  
 - RColorBrewer  
@@ -48,7 +49,11 @@ To be able to run the code in this repo, it is required to have `R` (>=3.4) and 
 
 ### Simulations
 
-TODO
+The functions used to estimate parameters based on real scRNA-seq data, and to simulate the expression counts can be found in the [simulationHelpFunctions_v7_diffInZero.R](https://github.com/statOmics/zinbwaveZinger/blob/master/zingeRsimulationFunctions/simulationHelpFunctions_v7_diffInZero.R) file in the zingeRsimulationFunctions folder. This framework has been used to simulate all scRNA-seq datasets.
+We have also simulated a bulk RNA-seq dataset and code for this simulation can be found in the [rnaseqSim.R](https://github.com/statOmics/zinbwaveZinger/blob/master/zinbwaveSimulations/RNASeq/rnaseqSim.R) file.
+The quality of the simulated datasets has been evaluated using the [countsimQC package](https://github.com/csoneson/countsimQC), and code for this evaluation can be found in the [zinbwaveSimulations/evaluateSimulatedData](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/evaluateSimulatedData) folder.
+The code for the evaluations on the simulated Islam, Trapnell and 10X datasets can be found in the respective [islam_sims_fc2](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/islam_sims_fc2), [trapnell_sims_fc2](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/trapnell_sims_fc2) and [tenX_sims_fc2](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/tenX_sims_fc2) folders. In the respective files, the FDP-TPR plots are saved and the final Figures can be recreated with the [fdrTprPlots.R](https://github.com/statOmics/zinbwaveZinger/blob/master/zinbwaveSimulations/fdrTprPlots.R) file.
+We have investigated the effect of the penalty parameter on the simulated Islam and 10x datasets, which can respectively be found in the [islam_sims_fc2_epsilon](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/islam_sims_fc2_epsilon) and [tenX_sims_fc2_epsilon](https://github.com/statOmics/zinbwaveZinger/tree/master/zinbwaveSimulations/tenX_sims_fc2_epsilon) folders.
 
 ### Mock comparisons
 
@@ -58,7 +63,7 @@ To generate the plots related to the false positive rate control, run [FPR_mocks
 
 To generate the plots related to the analysis of the 10x Genomics PBMC dataset, first run [createDataObject.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/createdata/createDataObject.Rmd) to create the data files. Then, to generate the data when the clustering is done using PCA, run both [de_seurat.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/clusteringPCA/de_seurat.Rmd) and [de_othermethods.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/clusteringPCA/de_othermethods.Rmd). There are two files to run instead of one unique file because packages `Seurat` and `zinbwave` load both many packages and R complains that there are too many packages loaded. To generate the plots when the clustering is done using ZINB-WaVE, run [dimredZinbwave.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/clusteringW/dimredZinbwave.Rmd), [clusterW.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/clusteringW/clusterW.Rmd), and then [de.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/clusteringW/de.Rmd). Finally, to generate the plots, run [plotPaper.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/plotPaper.Rmd).  
 
-TODO: Usoskin.
+To generate the results and plots for the differential expression analysis between the cell types identified in the Usoskin dataset, run the [deAnalysis.Rmd](https://github.com/statOmics/zinbwaveZinger/blob/master/realdata/usoskin/deAnalysis.Rmd) file.
 
 ### Time benchmarking
 
