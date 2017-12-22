@@ -72,9 +72,9 @@ L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
 L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
 L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
 L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
-lrtList=list()
-for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i], ZI=FALSE)
-padjListEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
+lrtListEdgeR=list()
+for(i in 1:ncol(L)) lrtListEdgeR[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i], ZI=FALSE)
+padjListEdgeR=lapply(lrtListEdgeR, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesEdgeR=unlist(lapply(padjListEdgeR,function(x) sum(x<.05)))
 deGenesEdgeR
 ```
@@ -217,10 +217,10 @@ L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
 L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
 L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
 L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
-lrtList=list()
+lrtListZinbwaveEdger=list()
 #for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
-for(i in 1:ncol(L)) lrtList[[i]] <- glmLRT(fit,contrast=L[,i])
-padjListZinbEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
+for(i in 1:ncol(L)) lrtListZinbwaveEdger[[i]] <- glmLRT(fit,contrast=L[,i])
+padjListZinbEdgeR=lapply(lrtListZinbwaveEdger, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
 deGenesZinbEdgeR
 
@@ -278,9 +278,9 @@ L[2:11,8] <- c(rep(-1/10,6),1,rep(-1/10,3)) #NP3 vs. others
 L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
 L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
 L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
-lrtList=list()
-for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i], ZI=TRUE, independentFiltering=TRUE)
-padjListZingerEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
+lrtListZingerEdgeR=list()
+for(i in 1:ncol(L)) lrtListZingerEdgeR[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i], ZI=TRUE, independentFiltering=TRUE)
+padjListZingerEdgeR=lapply(lrtListZingerEdgeR, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZingerEdgeR=unlist(lapply(padjListZingerEdgeR,function(x) sum(x<.05)))
 
 ```
@@ -355,7 +355,7 @@ resultsZingeR = data.frame(
             6944 , 5128 , 5154 , 801 , 4021 , 2422 , 6724 , 202 , 9388 , 153 , 5735, #limma
             640 , 711 , 186 , 289 , 589 , 1356 , 530 , 316 , 1691 , 75 , 1652, #DESeq2
             522 , 1011 , 348 , 419 , 1216 , 1915 , 762 , 376 , 2203 , 142 , 3087, #ZINB deseq2
-            670, 981, 314, 429, 1042, 1692, 671, 510 , 1555, 136, 2024, #zingeR DESeq2
+            823,  980,  289,  461,  907, 2044,  777,  574, 1933,  145, 2404, #zingeR DESeq2
             860 , 1375 , 401 , 654 , 1149 , 1942 , 933 , 380 , 1909 , 403 , 2458, #egdeR
             495 , 772 , 241 , 508 , 959 , 1802 , 967 , 464 , 2376 , 193 , 2919, #zinb edgeR
             981, 1740,  531,  797, 1542, 2237, 1092,  547, 2053,  492, 2769), #zingeR edger
@@ -369,12 +369,75 @@ ggplot(resultsZingeR, aes(fill=method, y=log10(nrGenes), x=1)) + geom_bar(positi
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) + ylab("log10(number of significant genes)")
 
+```
+
+
+
+### compare zingeR-edgeR with edgeR DE genes
+
+```{r}
+mains =  c("NF1", "NF2", "NF3", "NF4", "NF5", "NP1", "NP2", "NP3", "PEP1", "PEP2", "TH")
+plotVolcanoEdgeRZingeR <- function(comparison){
+  plot(x=lrtListZingerEdgeR[[comparison]]$table$logFC, y=-log10(lrtListZingerEdgeR[[comparison]]$table$PValue), xlab="log2 fold change", ylab="- log10(p-value)", main=mains[comparison])
+  padjZingeR = p.adjust(lrtListZingerEdgeR[[comparison]]$table$PValue, "BH")
+  padjEdgeR = p.adjust(lrtListEdgeR[[comparison]]$table$PValue, "BH")
+  colsBoth = (padjZingeR<=0.05 & padjEdgeR<=0.05)
+  colsOnlyZinger=(padjZingeR<=0.05 & padjEdgeR>0.05)
+  points(x=lrtListZingerEdgeR[[comparison]]$table$logFC[colsBoth], y=-log10(lrtListZingerEdgeR[[comparison]]$table$PValue[colsBoth]), col="blue", pch=16)
+  points(x=lrtListZingerEdgeR[[comparison]]$table$logFC[colsOnlyZinger], y=-log10(lrtListZingerEdgeR[[comparison]]$table$PValue[colsOnlyZinger]), col="red", pch=16)
+  legend("topleft", c("Significant in edgeR and zingeR_edgeR", "Only significant in zingeR_edgeR", "Non-significant"), pch=c(16,16,1), col=c("blue", "red", "black"), bty="n", cex=1/2)
+}
+
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/volcanoUsoskinZingeR.png", width=9,height=7, units="in", res=300)
+library(rafalib) ; mypar()
+par(mfrow=c(4,3))
+sapply(1:11, plotVolcanoEdgeRZingeR)
+dev.off()
+
+plotVolcanoEdgeRZinbwave <- function(comparison){
+    plot(x=lrtListZinbwaveEdger[[comparison]]$table$logFC, y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue), xlab="log2 fold change", ylab="- log10(p-value)", main=mains[comparison])
+    padjZinbwave = p.adjust(lrtListZinbwaveEdger[[comparison]]$table$PValue, "BH")
+    padjEdgeR = p.adjust(lrtListEdgeR[[comparison]]$table$PValue, "BH")
+    colsBoth = (padjZinbwave<=0.05 & padjEdgeR<=0.05)
+    colsOnlyZinger=(padjZinbwave<=0.05 & padjEdgeR>0.05)
+    points(x=lrtListZinbwaveEdger[[comparison]]$table$logFC[colsBoth], y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue[colsBoth]), col="blue", pch=16)
+    points(x=lrtListZinbwaveEdger[[comparison]]$table$logFC[colsOnlyZinger], y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue[colsOnlyZinger]), col="red", pch=16)
+    legend("topleft", c("Significant in edgeR and ZINBWaVE_edgeR", "Only significant in ZINBWaVE_edgeR", "Non-significant"), pch=c(16,16,1), col=c("blue", "red", "black"), bty="n", cex=1/2)
+}
+
+png("~/Dropbox/phdKoen/singleCell/zinbwaveZinger/plots2/volcanoUsoskinZinbwave.png", width=9,height=7, units="in", res=300)
+library(rafalib) ; mypar()
+par(mfrow=c(4,3))
+sapply(1:11, plotVolcanoEdgeRZinbwave)
+dev.off()
 
 
 
 
+
+
+
+  plot(x=lrtListZinbwaveEdger[[comparison]]$table$logFC, y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue), xlab="log2 fold change", ylab="- log10(p-value)", main=mains[comparison])
+  padjZingeR = p.adjust(lrtListZinbwaveEdger[[comparison]]$table$PValue, "BH")
+  padjEdgeR = p.adjust(lrtListEdgeR[[comparison]]$table$PValue, "BH")
+  colsBoth = (padjZingeR<=0.05 & padjEdgeR<=0.05)
+  colsOnlyZinger=(padjZingeR<=0.05 & padjEdgeR>0.05)
+  points(x=lrtListZinbwaveEdger[[comparison]]$table$logFC[colsBoth], y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue[colsBoth]), col="blue", pch=16)
+  points(x=lrtListZinbwaveEdger[[comparison]]$table$logFC[colsOnlyZinger], y=-log10(lrtListZinbwaveEdger[[comparison]]$table$PValue[colsOnlyZinger]), col="red", pch=16)
+  legend("topleft", c("Significant in edgeR and ZINBWaVE_edgeR", "Only significant in ZINBWaVE_edgeR", "Non-significant"), pch=c(16,16,1), col=c("blue", "red", "black"), bty="n", cex=1/2)
 
 ```
+
+
+
+
+
+
+
+
+
+
+
 
 
 ### Check effect of epsilon for ZINB-WaVE edgeR results
@@ -414,6 +477,5 @@ padjListZinbEdgeR=lapply(lrtList, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
 epsResultsDE[[i]] = deGenesZinbEdgeR
 }
-
 
 ```
