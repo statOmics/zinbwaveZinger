@@ -120,7 +120,7 @@ DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
   dse <- DESeqDataSetFromMatrix(countData=counts, colData=colData, design=~group)
   colData(dse)$group <- as.factor(colData(dse)$group)
   dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
+  dse <- estimateDispersions(dse, minmu=1e-3)
   dse <- nbinomWaldTest(dse, betaPrior=TRUE, minmu=1e-3)
   rr <- results(dse)
   cbind(pval = rr$pvalue, padj = rr$padj)
@@ -300,9 +300,9 @@ zingeR_DESeq2 <- function(counts, group, ylim = NULL, xlim = NULL){
                            designFormula = ~group, verbose = F)
   assays(dse)[["weights"]] <- weights
   dse <- DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse <- estimateDispersions(dse)
+  dse <- estimateDispersions(dse, minmu=1e-3)
   dse <- nbinomWaldTest(dse, betaPrior = TRUE, useT = TRUE,
-                        df = rowSums(weights) - 2)
+                        df = rowSums(weights) - 2, minmu=1e-3)
   rr <- results(dse)
   cbind(pval = rr$pvalue, padj = rr$padj)
 }
@@ -339,7 +339,7 @@ zinbwave_DESeq2 <- function(counts, group, zinb){
   weights[weights<1e-6] = 1e-6 #prevent sanity check error for weights
   assays(dse)[["weights"]]=weights
   dse = DESeq2::estimateSizeFactors(dse, type="poscounts")
-  dse = estimateDispersions(dse)
+  dse = estimateDispersions(dse, minmu=1e-3)
   dse = nbinomWaldTest(dse, betaPrior=TRUE, useT=TRUE, df=rowSums(weights)-2, minmu=1e-3)
   res = results(dse)
   cbind(pval = res$pvalue, padj = res$padj)

@@ -40,7 +40,7 @@ getDatasetMoMPositive = function(counts, drop.extreme.dispersion = FALSE, cpm= "
 
   #### estimate lambda and overdispersion based on ZTNB.
 	d <- DGEList(counts)
-	cp <- cpm(d,normalized.lib.sizes=TRUE)
+	#cp <- cpm(d,normalized.lib.sizes=TRUE)
 	dFiltered=d
 	dFiltered <- edgeR::calcNormFactors(dFiltered)
   dFiltered$AveLogCPM <- aveLogCPM(dFiltered)
