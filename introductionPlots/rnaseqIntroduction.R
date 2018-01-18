@@ -172,7 +172,7 @@ plotBCVIk(dNoZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25,
 mtext("c",side=3, at=-3.5, cex=4/3,font=2)
 plotBCVIk(dZero, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="ZI RNA-seq: simulated Bottomly", ylim=c(0,3))
 mtext("d",side=3, at=-3.5, cex=4/3,font=2)
-plotBCVIk(dW, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="downeighted ZI RNA-seq: simulated Bottomly", ylim=c(0,3))
+plotBCVIk(dW, col.common=NULL, col.trend="red", cex.axis=1.5, cex.lab=1.25, bty="l", main="downweighted ZI RNA-seq: simulated Bottomly", ylim=c(0,3))
 mtext("e",side=3, at=-3.5, cex=4/3,font=2)
 plot(x=hlp$FDR[hlp$method=="edgeR"], y=hlp$TPR[hlp$method=="edgeR"], type="l", xlim=c(0,0.4), col="red", lwd=2, xlab="False discovery proportion", ylab="True positive rate", cex.axis=1.5, cex.lab=1.5, bty="l")
 lines(x=hlp$FDR[hlp$method=="edgeRWeighted"], y=hlp$TPR[hlp$method=="edgeRWeighted"], type="l", xlim=c(0,0.4), col="chocolate1", lwd=2, xlab="False discovery rate", ylab="True positive rate")
