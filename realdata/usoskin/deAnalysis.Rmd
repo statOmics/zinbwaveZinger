@@ -218,8 +218,7 @@ L[2:11,9] <- c(rep(-1/10,7),1,rep(-1/10,2)) #PEP1 vs. others
 L[2:11,10] <- c(rep(-1/10,8),1,rep(-1/10,1)) #PEP2 vs. others
 L[2:11,11] <- c(rep(-1/10,9),1) #TH vs. others
 lrtListZinbwaveEdger=list()
-#for(i in 1:ncol(L)) lrtList[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
-for(i in 1:ncol(L)) lrtListZinbwaveEdger[[i]] <- glmLRT(fit,contrast=L[,i])
+for(i in 1:ncol(L)) lrtListZinbwaveEdger[[i]] <- zinbwave::glmWeightedF(fit,contrast=L[,i])
 padjListZinbEdgeR=lapply(lrtListZinbwaveEdger, function(x) p.adjust(x$table$PValue,"BH"))
 deGenesZinbEdgeR=unlist(lapply(padjListZinbEdgeR,function(x) sum(x<=.05)))
 deGenesZinbEdgeR
