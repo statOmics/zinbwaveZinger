@@ -1,6 +1,7 @@
 # Data analysis for the ZINB-WaVE / zingeR paper
 
-This repository is designed to allow interested people to reproduce the results and figures of our paper called 'Unlocking RNA-seq tools for zero inflation and single-cell applications using observation weights'.   
+This repository is designed to allow interested people to reproduce the results and figures of our paper called 'Observation weights unlock bulk RNA-seq tools for zero inflation and single-cell applications', currently on bioRxiv at https://www.biorxiv.org/content/early/2018/01/18/250126.
+All code in the repository is distributed under the GPL-3 license.
 
 For any questions or issues with the code on this repository, please use the "Issues" tab.
 
