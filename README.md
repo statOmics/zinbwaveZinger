@@ -3,6 +3,8 @@
 This repository is designed to allow interested people to reproduce the results and figures of our paper called 'Observation weights unlock bulk RNA-seq tools for zero inflation and single-cell applications', currently on bioRxiv at https://www.biorxiv.org/content/early/2018/01/18/250126.
 All code in the repository is distributed under the GPL-3 license.
 
+For examples on how to use the method, please see the [zinbwave vignette](https://github.com/drisso/zinbwave/blob/master/vignettes/intro.Rmd#differential-expression) or the [zingeR vignette](https://github.com/statOmics/zingeR/blob/master/vignettes/zingeRVignette_v2.Rmd#differential-expression-analysis) on how to use the observation weights in your analysis.
+
 For any questions or issues with the code on this repository, please use the "Issues" tab.
 
 ## Dependencies
